@@ -53,6 +53,11 @@ export type Camp = {
   notes: string;
 };
 
+export type AdminRoute = {
+  href: "/" | "/camps/import" | "/providers";
+  label: string;
+};
+
 export type ImportResult = {
   camps: Camp[];
   errors: string[];

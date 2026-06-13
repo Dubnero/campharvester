@@ -2,6 +2,8 @@
 
 CampHarvester is an internal admin prototype for collecting, reviewing and managing Irish kids' camp listings. This first version is intentionally mock-data only and is focused on manual review workflows for Wicklow and Dublin listings.
 
+This branch keeps the admin dashboard, Provider Import page and Camps Import Wizard together as local-only workflows with no database dependency.
+
 ## What is included
 
 - Dashboard metrics for total, draft, approved, needs-review, and camps linked to verified or featured providers.

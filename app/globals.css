@@ -495,3 +495,9 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.hero-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
