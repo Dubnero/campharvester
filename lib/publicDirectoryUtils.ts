@@ -15,6 +15,8 @@ export type PublicFilters = {
   age: string;
 };
 
+export type PublicSort = "soonest" | "price-asc" | "price-desc" | "age-youngest" | "age-oldest";
+
 export function slugify(value: string) {
   return value
     .toLowerCase()
@@ -43,7 +45,7 @@ export function getUniquePublicValues(camps: PublicCamp[], key: keyof Pick<Camp,
 
 export function filterPublicCamps(camps: PublicCamp[], filters: PublicFilters) {
   const search = filters.search.trim().toLowerCase();
-  const requestedAge = Number(filters.age);
+  const requestedAge = filters.age === "16+" ? 16 : Number(filters.age);
 
   return camps.filter((camp) => {
     const matchesSearch = search
@@ -61,6 +63,26 @@ export function filterPublicCamps(camps: PublicCamp[], filters: PublicFilters) {
       (!filters.holiday || camp.holiday_type === filters.holiday) &&
       matchesAge
     );
+  });
+}
+
+function dateValue(value: string) {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
+}
+
+function priceValue(value: string) {
+  const match = value.replace(/,/g, "").match(/\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
+}
+
+export function sortPublicCamps(camps: PublicCamp[], sort: PublicSort) {
+  return [...camps].sort((a, b) => {
+    if (sort === "price-asc") return priceValue(a.price) - priceValue(b.price) || a.camp_name.localeCompare(b.camp_name);
+    if (sort === "price-desc") return priceValue(b.price) - priceValue(a.price) || a.camp_name.localeCompare(b.camp_name);
+    if (sort === "age-youngest") return a.age_min - b.age_min || a.age_max - b.age_max || a.camp_name.localeCompare(b.camp_name);
+    if (sort === "age-oldest") return b.age_max - a.age_max || b.age_min - a.age_min || a.camp_name.localeCompare(b.camp_name);
+    return dateValue(a.start_date) - dateValue(b.start_date) || a.camp_name.localeCompare(b.camp_name);
   });
 }
 
