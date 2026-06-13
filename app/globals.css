@@ -503,3 +503,215 @@ button:disabled:hover {
     grid-template-columns: 1fr;
   }
 }
+
+.public-directory-link {
+  background: #f97316;
+}
+
+.public-directory-link:hover {
+  background: #c2410c;
+}
+
+.public-shell {
+  display: grid;
+  gap: 1.5rem;
+  margin: 0 auto;
+  max-width: 1180px;
+  padding: 2rem;
+}
+
+.public-hero,
+.public-panel,
+.public-detail {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+}
+
+.public-hero {
+  background: linear-gradient(135deg, #ecfdf3 0%, #eff6ff 100%);
+  padding: clamp(2rem, 5vw, 4.5rem);
+}
+
+.public-hero h1,
+.detail-hero h1 {
+  font-size: clamp(2rem, 5vw, 4rem);
+  line-height: 1;
+  margin: 0;
+  max-width: 760px;
+}
+
+.public-hero p,
+.detail-hero p,
+.directory-heading p,
+.camp-card p,
+.detail-description p {
+  color: var(--muted);
+}
+
+.public-hero p:last-child {
+  font-size: 1.15rem;
+  max-width: 680px;
+}
+
+.public-panel,
+.public-detail {
+  padding: 1.25rem;
+}
+
+.public-filters {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.public-search {
+  grid-column: span 2;
+}
+
+.directory-heading {
+  align-items: flex-end;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.directory-heading h2 {
+  margin-bottom: 0;
+}
+
+.camp-card-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.camp-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.camp-card h3 {
+  font-size: 1.25rem;
+  margin: 0.2rem 0;
+}
+
+.card-kicker {
+  color: var(--primary) !important;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.camp-card-meta,
+.detail-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.camp-card-meta div,
+.detail-list div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.camp-card-meta dt,
+.detail-list dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.camp-card-meta dd,
+.detail-list dd {
+  margin: 0;
+}
+
+.back-link {
+  color: var(--primary-dark);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.detail-hero {
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1.25rem, 4vw, 3rem);
+}
+
+.detail-hero .button-link {
+  justify-self: start;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 2rem;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+  padding: clamp(1.25rem, 4vw, 3rem);
+}
+
+.detail-description h2 {
+  margin-top: 0;
+}
+
+.detail-list {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 1rem;
+}
+
+.detail-list a {
+  color: var(--primary-dark);
+  overflow-wrap: anywhere;
+}
+
+.empty-detail {
+  display: grid;
+  gap: 1rem;
+  justify-items: start;
+}
+
+@media (max-width: 1000px) {
+  .public-filters,
+  .camp-card-grid,
+  .detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .public-search {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 700px) {
+  .public-shell {
+    padding: 1rem;
+  }
+
+  .public-filters,
+  .camp-card-grid,
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .public-search {
+    grid-column: span 1;
+  }
+
+  .directory-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
