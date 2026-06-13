@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ChangeEvent, FormEvent, useMemo, useRef, useState } from "react";
 import {
   campFields,
@@ -203,6 +204,9 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
           </p>
         </div>
         <div className="hero-actions">
+          <Link className="button-link" href="/camps/import">
+            Camps import wizard
+          </Link>
           <button type="button" onClick={addCamp}>
             Add draft camp
           </button>
