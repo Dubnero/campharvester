@@ -142,6 +142,19 @@ small {
   justify-content: space-between;
 }
 
+.data-source-banner {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.data-source-banner p {
+  color: var(--muted);
+  font-weight: 700;
+  margin: 0;
+}
+
 .file-input {
   align-items: center;
   background: #eef6ff;

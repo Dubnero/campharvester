@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { campsToCsv } from "@/lib/campUtils";
+import { saveStoredCamps } from "@/lib/campStorage";
 import {
   buildCampImportSummary,
   campsFromImportSummary,
@@ -61,7 +62,9 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
 
   function handleAcceptImport() {
     if (!summary || summary.errors.length > 0) return;
-    setAcceptedCamps(campsFromImportSummary(summary));
+    const acceptedImportCamps = campsFromImportSummary(summary);
+    setAcceptedCamps(acceptedImportCamps);
+    saveStoredCamps(acceptedImportCamps);
     setAcceptedAt(new Date().toLocaleString());
   }
 
@@ -150,7 +153,7 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
             </article>
             <article>
               <h3>Accepted output</h3>
-              <p>Accepted imports replace the wizard preview only; existing provider import flows are unchanged.</p>
+              <p>Accepted imports update the wizard preview, remain available for CSV export and are saved to the dashboard.</p>
               <button type="button" className="secondary" onClick={handleDownloadAccepted}>Export accepted CSV</button>
               {acceptedAt ? <p className="empty-state">Last accepted {acceptedAt}</p> : null}
             </article>

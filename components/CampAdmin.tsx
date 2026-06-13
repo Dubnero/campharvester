@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, FormEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   campFields,
   campsToCsv,
@@ -14,6 +14,8 @@ import {
   requiredCampFields,
   validateCamp,
 } from "@/lib/campUtils";
+import { clearStoredCamps, loadStoredCamps } from "@/lib/campStorage";
+import { loadStoredProviders } from "@/lib/providerStorage";
 import { Camp, Provider, campStatuses, dayLengths, holidayTypes } from "@/lib/types";
 
 type Filters = {
@@ -48,7 +50,8 @@ function badgeClass(status: Camp["status"]) {
 
 export function CampAdmin({ initialCamps, initialProviders }: Props) {
   const [camps, setCamps] = useState<Camp[]>(initialCamps);
-  const [providers] = useState<Provider[]>(initialProviders);
+  const [providers, setProviders] = useState<Provider[]>(initialProviders);
+  const [usingImportedCamps, setUsingImportedCamps] = useState(false);
   const [selectedCampId, setSelectedCampId] = useState(initialCamps[0]?.id ?? "");
   const [filters, setFilters] = useState<Filters>({
     search: "",
@@ -60,6 +63,18 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const storedProviders = loadStoredProviders();
+    if (storedProviders) setProviders(storedProviders);
+
+    const storedCamps = loadStoredCamps();
+    if (!storedCamps) return;
+
+    setCamps(storedCamps);
+    setSelectedCampId(storedCamps[0]?.id ?? "");
+    setUsingImportedCamps(true);
+  }, []);
 
   const providerLookup = useMemo(() => providersById(providers), [providers]);
   const stats = useMemo(() => getDashboardStats(camps, providers), [camps, providers]);
@@ -77,6 +92,20 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
     setCamps((currentCamps) =>
       currentCamps.map((camp) => (camp.id === selectedCamp.id ? { ...camp, [field]: value } : camp)),
     );
+  }
+
+  function handleClearImportedCamps() {
+    if (!usingImportedCamps) return;
+    const confirmed = window.confirm("Clear imported camps and revert to mock camp data?");
+    if (!confirmed) return;
+
+    clearStoredCamps();
+    setCamps(initialCamps);
+    setSelectedCampId(initialCamps[0]?.id ?? "");
+    setUsingImportedCamps(false);
+    setFilters({ search: "", county: "", activityType: "", holidayType: "", status: "" });
+    setImportErrors([]);
+    setFormErrors([]);
   }
 
   function addCamp() {
@@ -210,7 +239,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
     <main className="app-shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">Internal admin · mock data only</p>
+          <p className="eyebrow">Internal admin · local data</p>
           <h1>CampHarvester</h1>
           <p>
             Collect, review and manage Irish kids&apos; camp listings for Wicklow and Dublin before the public
@@ -233,6 +262,19 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
         </div>
       </header>
 
+      <section className="panel data-source-banner" aria-live="polite">
+        <p>
+          {usingImportedCamps
+            ? `Showing imported camp data (${camps.length} camps loaded from local storage).`
+            : "Showing mock camp data."}
+        </p>
+        {usingImportedCamps ? (
+          <button type="button" className="secondary" onClick={handleClearImportedCamps}>
+            Clear imported camps
+          </button>
+        ) : null}
+      </section>
+
       <section className="stats-grid" aria-label="Dashboard metrics">
         <article><span>Total camps</span><strong>{stats.total}</strong></article>
         <article><span>Draft camps</span><strong>{stats.draft}</strong></article>
@@ -246,7 +288,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
         <div>
           <h2>CSV import</h2>
           <p>
-            Import camp CSV rows that reference an existing provider_id. Provider records stay local and mock-data based.
+            Import camp CSV rows that reference an existing provider_id. Use the Camps Import Wizard to persist accepted imports to the dashboard.
           </p>
         </div>
         <label className="file-input">
@@ -265,7 +307,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
         <div className="section-heading">
           <div>
             <h2>Camp listings</h2>
-            <p>{filteredCamps.length} of {camps.length} camps shown · {providers.length} mock providers available</p>
+            <p>{filteredCamps.length} of {camps.length} camps shown · {providers.length} providers available</p>
           </div>
         </div>
         <div className="filters">
@@ -360,7 +402,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
         <div className="section-heading">
           <div>
             <h2>Edit camp</h2>
-            <p>Camp records store provider_id only; provider details below are resolved from mock provider data.</p>
+            <p>Camp records store provider_id only; provider details below are resolved from the active provider data.</p>
           </div>
           <span className={badgeClass(selectedCamp.status)}>{selectedCamp.status}</span>
         </div>

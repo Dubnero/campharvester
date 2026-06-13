@@ -1,0 +1,66 @@
+import { campStatuses, dayLengths, holidayTypes, type Camp } from "./types";
+
+export const campStorageKey = "campharvester.camps";
+
+export function loadStoredCamps(): Camp[] | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const storedCamps = window.localStorage.getItem(campStorageKey);
+    if (!storedCamps) return null;
+
+    const parsed = JSON.parse(storedCamps);
+    if (!Array.isArray(parsed)) return null;
+
+    const camps = parsed.filter(isCampRecord);
+    return camps.length > 0 ? camps : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveStoredCamps(camps: Camp[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(campStorageKey, JSON.stringify(camps));
+}
+
+export function clearStoredCamps() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(campStorageKey);
+}
+
+function isCampRecord(value: unknown): value is Camp {
+  if (!value || typeof value !== "object") return false;
+  const camp = value as Partial<Camp>;
+
+  return (
+    typeof camp.id === "string" &&
+    camp.id.trim().length > 0 &&
+    typeof camp.provider_id === "string" &&
+    camp.provider_id.trim().length > 0 &&
+    typeof camp.camp_name === "string" &&
+    camp.camp_name.trim().length > 0 &&
+    typeof camp.county === "string" &&
+    typeof camp.town === "string" &&
+    typeof camp.address === "string" &&
+    typeof camp.eircode === "string" &&
+    typeof camp.activity_type === "string" &&
+    holidayTypes.includes(camp.holiday_type as Camp["holiday_type"]) &&
+    typeof camp.age_min === "number" &&
+    Number.isFinite(camp.age_min) &&
+    typeof camp.age_max === "number" &&
+    Number.isFinite(camp.age_max) &&
+    typeof camp.start_date === "string" &&
+    typeof camp.end_date === "string" &&
+    typeof camp.start_time === "string" &&
+    typeof camp.end_time === "string" &&
+    dayLengths.includes(camp.half_day_or_full_day as Camp["half_day_or_full_day"]) &&
+    typeof camp.price === "string" &&
+    typeof camp.booking_url === "string" &&
+    campStatuses.includes(camp.status as Camp["status"]) &&
+    typeof camp.verified === "boolean" &&
+    typeof camp.featured === "boolean" &&
+    typeof camp.source_url === "string" &&
+    typeof camp.last_checked === "string"
+  );
+}
