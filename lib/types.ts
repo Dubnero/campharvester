@@ -31,9 +31,10 @@ export type Camp = {
   id: string;
   provider_id: string;
   camp_name: string;
-  location: string;
   county: string;
+  town: string;
   address: string;
+  eircode: string;
   activity_type: string;
   holiday_type: HolidayType;
   age_min: number;
@@ -45,12 +46,11 @@ export type Camp = {
   half_day_or_full_day: DayLength;
   price: string;
   booking_url: string;
-  contact_email: string;
-  source_url: string;
-  last_checked_date: string;
-  slug: string;
   status: CampStatus;
-  notes: string;
+  verified: boolean;
+  featured: boolean;
+  source_url: string;
+  last_checked: string;
 };
 
 export type ImportResult = {

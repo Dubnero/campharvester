@@ -60,13 +60,13 @@ Camps store camp-specific listing details and reference providers by `provider_i
 The importer expects camp rows with a header row. Required camp columns are:
 
 ```text
-id, provider_id, camp_name, location, county, activity_type, holiday_type, age_min, age_max, start_date, end_date, half_day_or_full_day, slug, status
+camp_id, provider_id, camp_name, county, town, address, eircode, activity_type, holiday_type, age_min, age_max, start_date, end_date, start_time, end_time, half_day_or_full_day, price, booking_url, status, verified, featured, source_url, last_checked
 ```
 
 Optional camp columns are preserved when present:
 
 ```text
-address, start_time, end_time, price, booking_url, contact_email, source_url, last_checked_date, notes
+Optional fields can be left blank, but location and slug are no longer required by the current import schema.
 ```
 
 Allowed values:

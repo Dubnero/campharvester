@@ -1,4 +1,4 @@
-import { campFields, createBlankCamp, parseCsv, requiredCampFields, validateCamp } from "./campUtils";
+import { campFields, createBlankCamp, parseBoolean, parseCsv, requiredCampFields, validateCamp } from "./campUtils";
 import { Camp, Provider } from "./types";
 
 export type CampImportRow = {
@@ -95,6 +95,8 @@ export function buildCampImportSummary(csvText: string, providers: Provider[]): 
       const rawValue = getRawValue(values, field, camp[field]);
       if (field === "age_min" || field === "age_max") {
         (camp[field] as number) = Number(rawValue);
+      } else if (field === "verified" || field === "featured") {
+        (camp[field] as boolean) = parseBoolean(rawValue);
       } else {
         (camp[field] as string) = String(rawValue);
       }

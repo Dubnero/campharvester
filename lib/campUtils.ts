@@ -4,9 +4,10 @@ export const campFields: (keyof Camp)[] = [
   "id",
   "provider_id",
   "camp_name",
-  "location",
   "county",
+  "town",
   "address",
+  "eircode",
   "activity_type",
   "holiday_type",
   "age_min",
@@ -18,19 +19,17 @@ export const campFields: (keyof Camp)[] = [
   "half_day_or_full_day",
   "price",
   "booking_url",
-  "contact_email",
-  "source_url",
-  "last_checked_date",
-  "slug",
   "status",
-  "notes",
+  "verified",
+  "featured",
+  "source_url",
+  "last_checked",
 ];
 
 export const requiredCampFields: (keyof Camp)[] = [
   "id",
   "provider_id",
   "camp_name",
-  "location",
   "county",
   "activity_type",
   "holiday_type",
@@ -39,7 +38,6 @@ export const requiredCampFields: (keyof Camp)[] = [
   "start_date",
   "end_date",
   "half_day_or_full_day",
-  "slug",
   "status",
 ];
 
@@ -48,9 +46,10 @@ export function createBlankCamp(defaultProviderId = ""): Camp {
     id: `camp-${Date.now()}`,
     provider_id: defaultProviderId,
     camp_name: "",
-    location: "",
     county: "",
+    town: "",
     address: "",
+    eircode: "",
     activity_type: "",
     holiday_type: "Summer",
     age_min: 5,
@@ -62,12 +61,11 @@ export function createBlankCamp(defaultProviderId = ""): Camp {
     half_day_or_full_day: "Unknown",
     price: "",
     booking_url: "",
-    contact_email: "",
-    source_url: "",
-    last_checked_date: new Date().toISOString().slice(0, 10),
-    slug: "",
     status: "draft",
-    notes: "",
+    verified: false,
+    featured: false,
+    source_url: "",
+    last_checked: new Date().toISOString().slice(0, 10),
   };
 }
 
@@ -107,7 +105,7 @@ export function filterCamps(
   return camps.filter((camp) => {
     const provider = providerLookup[camp.provider_id];
     const matchesSearch = search
-      ? [camp.camp_name, provider?.provider_name ?? "", camp.location, camp.county].some((value) =>
+      ? [camp.camp_name, provider?.provider_name ?? "", camp.town, camp.county, camp.address].some((value) =>
           value.toLowerCase().includes(search),
         )
       : true;
@@ -156,7 +154,38 @@ export function validateCamp(camp: Camp, providers: Provider[], rowLabel = "Camp
     errors.push(`${rowLabel}: age_min cannot be greater than age_max.`);
   }
 
+  if (camp.start_date && !isValidDateValue(camp.start_date)) {
+    errors.push(`${rowLabel}: start_date must be a valid YYYY-MM-DD date.`);
+  }
+
+  if (camp.end_date && !isValidDateValue(camp.end_date)) {
+    errors.push(`${rowLabel}: end_date must be a valid YYYY-MM-DD date.`);
+  }
+
+  if (
+    camp.start_date &&
+    camp.end_date &&
+    isValidDateValue(camp.start_date) &&
+    isValidDateValue(camp.end_date) &&
+    camp.start_date > camp.end_date
+  ) {
+    errors.push(`${rowLabel}: start_date cannot be after end_date.`);
+  }
+
+  if (camp.last_checked && !isValidDateValue(camp.last_checked)) {
+    errors.push(`${rowLabel}: last_checked must be a valid YYYY-MM-DD date.`);
+  }
+
   return errors;
+}
+
+export function parseBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  return ["true", "yes", "1", "y"].includes(String(value ?? "").trim().toLowerCase());
+}
+
+function isValidDateValue(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
 }
 
 function escapeCsvValue(value: unknown) {
@@ -168,7 +197,7 @@ function escapeCsvValue(value: unknown) {
 }
 
 export function campsToCsv(camps: Camp[]) {
-  const rows = [campFields.join(",")];
+  const rows = [campFields.map((field) => (field === "id" ? "camp_id" : field)).join(",")];
   camps.forEach((camp) => {
     rows.push(campFields.map((field) => escapeCsvValue(camp[field])).join(","));
   });
@@ -225,7 +254,11 @@ export function csvToCamps(text: string, providers: Provider[]): ImportResult {
   }
 
   const headers = rows[0].map((header) => header.trim());
-  const missingRequired = requiredCampFields.filter((field) => !headers.includes(field));
+  const hasCampId = headers.includes("camp_id") || headers.includes("id");
+  const missingRequired = requiredCampFields.filter((field) => {
+    if (field === "id") return !hasCampId;
+    return !headers.includes(field);
+  });
 
   if (missingRequired.length > 0) {
     return {
@@ -239,9 +272,11 @@ export function csvToCamps(text: string, providers: Provider[]): ImportResult {
     const camp = createBlankCamp(providers[0]?.provider_id ?? "");
 
     campFields.forEach((field) => {
-      const rawValue = values[field] ?? camp[field];
+      const rawValue = field === "id" ? (values.camp_id ?? values.id ?? camp[field]) : (values[field] ?? camp[field]);
       if (field === "age_min" || field === "age_max") {
         (camp[field] as number) = Number(rawValue);
+      } else if (field === "verified" || field === "featured") {
+        (camp[field] as boolean) = parseBoolean(rawValue);
       } else {
         (camp[field] as string) = String(rawValue);
       }
