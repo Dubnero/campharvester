@@ -155,7 +155,7 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
                   <tr key={`${rowNumber}-${camp.id}`}>
                     <td>{rowNumber}</td>
                     <td>{camp.id}</td>
-                    <td><strong>{camp.camp_name}</strong><small>{camp.location}, {camp.county}</small></td>
+                    <td><strong>{camp.camp_name}</strong><small>{camp.town || camp.address}, {camp.county}</small></td>
                     <td>{camp.provider_id}</td>
                     <td>{camp.holiday_type}</td>
                     <td>{camp.age_min}–{camp.age_max}</td>

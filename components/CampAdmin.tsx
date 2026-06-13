@@ -31,9 +31,10 @@ type Props = {
 
 const selectFields = new Set<keyof Camp>(["provider_id", "holiday_type", "half_day_or_full_day", "status"]);
 const numberFields = new Set<keyof Camp>(["age_min", "age_max"]);
-const dateFields = new Set<keyof Camp>(["start_date", "end_date", "last_checked_date"]);
+const dateFields = new Set<keyof Camp>(["start_date", "end_date", "last_checked"]);
 const timeFields = new Set<keyof Camp>(["start_time", "end_time"]);
-const longTextFields = new Set<keyof Camp>(["address", "notes"]);
+const booleanFields = new Set<keyof Camp>(["verified", "featured"]);
+const longTextFields = new Set<keyof Camp>(["address"]);
 
 function formatLabel(field: string) {
   return field.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
@@ -72,7 +73,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
-  function updateCamp(field: keyof Camp, value: string | number) {
+  function updateCamp(field: keyof Camp, value: string | number | boolean) {
     setCamps((currentCamps) =>
       currentCamps.map((camp) => (camp.id === selectedCamp.id ? { ...camp, [field]: value } : camp)),
     );
@@ -161,6 +162,19 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
         <label key={field} className="wide-field">
           {formatLabel(field)} {isRequired ? <span className="required">*</span> : null}
           <textarea value={String(value)} onChange={(event) => updateCamp(field, event.target.value)} required={isRequired} />
+        </label>
+      );
+    }
+
+    if (booleanFields.has(field)) {
+      return (
+        <label key={field} className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={Boolean(value)}
+            onChange={(event) => updateCamp(field, event.target.checked)}
+          />
+          {formatLabel(field)}
         </label>
       );
     }
@@ -258,7 +272,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
           <label>
             Search
             <input
-              placeholder="Camp, provider, location or county"
+              placeholder="Camp, provider, town, address or county"
               value={filters.search}
               onChange={(event) => updateFilter("search", event.target.value)}
             />
@@ -298,7 +312,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
               <tr>
                 <th>Camp</th>
                 <th>Provider</th>
-                <th>Location</th>
+                <th>Town</th>
                 <th>County</th>
                 <th>Activity</th>
                 <th>Holiday</th>
@@ -324,7 +338,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
                       <strong>{provider?.provider_name ?? "Unknown provider"}</strong>
                       <small>{provider?.email ?? camp.provider_id}</small>
                     </td>
-                    <td>{camp.location}</td>
+                    <td>{camp.town}</td>
                     <td>{camp.county}</td>
                     <td>{camp.activity_type}</td>
                     <td>{camp.holiday_type}</td>
