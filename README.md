@@ -25,6 +25,14 @@ CampHarvester is an internal admin prototype for collecting, reviewing and manag
 - Scraping.
 - OpenAI integration.
 
+## Admin routes
+
+| Route | Purpose |
+| --- | --- |
+| `/` | Camp admin dashboard, listing table, edit form, camp CSV import/export. |
+| `/camps/import` | Camps Import Wizard for validating `camps.csv` before accepting clean rows locally. |
+| `/providers` | Provider Import page for uploading and searching local `providers.csv` data. |
+
 ## Local setup
 
 Install dependencies:
