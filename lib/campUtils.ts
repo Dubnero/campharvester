@@ -120,6 +120,11 @@ export function filterCamps(
   });
 }
 
+export function normalizeDayLength(value: unknown) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return dayLengths.find((dayLength) => dayLength.toLowerCase() === normalized);
+}
+
 export function validateCamp(camp: Camp, providers: Provider[], rowLabel = "Camp") {
   const errors: string[] = [];
   const providerIds = new Set(providers.map((provider) => provider.provider_id));
@@ -142,7 +147,7 @@ export function validateCamp(camp: Camp, providers: Provider[], rowLabel = "Camp
     errors.push(`${rowLabel}: status must be one of ${campStatuses.join(", ")}.`);
   }
 
-  if (!dayLengths.includes(camp.half_day_or_full_day)) {
+  if (!normalizeDayLength(camp.half_day_or_full_day)) {
     errors.push(`${rowLabel}: half_day_or_full_day must be one of ${dayLengths.join(", ")}.`);
   }
 
@@ -278,7 +283,7 @@ export function csvToCamps(text: string, providers: Provider[]): ImportResult {
       } else if (field === "verified" || field === "featured") {
         (camp[field] as boolean) = parseBoolean(rawValue);
       } else {
-        (camp[field] as string) = String(rawValue);
+        (camp[field] as string) = field === "half_day_or_full_day" ? normalizeDayLength(rawValue) ?? String(rawValue) : String(rawValue);
       }
     });
 
