@@ -13,7 +13,7 @@ function SummaryList({ title, values }: { title: string; values: Record<string, 
   const entries = Object.entries(values).sort(([, firstCount], [, secondCount]) => secondCount - firstCount);
 
   return (
-    <article className="breakdown-card">
+    <article className="panel">
       <h3>{title}</h3>
       {entries.length > 0 ? (
         <ul>
@@ -97,13 +97,13 @@ export function CampImportWizard({ initialProviders }: Props) {
         </label>
       </section>
 
-      <section className="stats-grid import-stats" aria-label="Camp import metrics">
+      <section className="stats-grid provider-stats" aria-label="Camp import metrics">
         <article><span>Total camps imported</span><strong>{summary.totalCamps}</strong></article>
         <article><span>Total validation errors</span><strong>{summary.totalErrors}</strong></article>
         <article><span>Total warnings</span><strong>{summary.totalWarnings}</strong></article>
       </section>
 
-      <section className="breakdown-grid" aria-label="Camp import breakdowns">
+      <section className="filters" aria-label="Camp import breakdowns">
         <SummaryList title="Camps by provider" values={summary.campsByProvider} />
         <SummaryList title="Camps by county" values={summary.campsByCounty} />
         <SummaryList title="Camps by activity type" values={summary.campsByActivityType} />
@@ -123,7 +123,7 @@ export function CampImportWizard({ initialProviders }: Props) {
         </div>
 
         {acceptedCamps.length > 0 ? (
-          <div className="success-box" role="status">
+          <div className="panel" role="status">
             Accepted {acceptedCamps.length} camp records locally for this page session. No database was updated.
           </div>
         ) : null}
@@ -144,7 +144,7 @@ export function CampImportWizard({ initialProviders }: Props) {
               <tbody>
                 {report.issues.map((issue, index) => (
                   <tr key={`${issue.row}-${issue.message}-${index}`}>
-                    <td><span className={issue.level === "error" ? "badge danger" : "badge warning"}>{issue.level}</span></td>
+                    <td><span className={issue.level === "error" ? "badge warning" : "badge muted"}>{issue.level}</span></td>
                     <td>{issue.row || "File"}</td>
                     <td>{issue.field ?? "—"}</td>
                     <td>{issue.message}</td>
@@ -154,7 +154,7 @@ export function CampImportWizard({ initialProviders }: Props) {
             </table>
           </div>
         ) : (
-          <div className="success-box" role="status">
+          <div className="panel" role="status">
             No validation errors or warnings found. This import is ready to accept locally.
           </div>
         )}

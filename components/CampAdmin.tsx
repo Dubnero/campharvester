@@ -14,7 +14,7 @@ import {
   requiredCampFields,
   validateCamp,
 } from "@/lib/campUtils";
-import { AdminRoute, Camp, Provider, campStatuses, dayLengths, holidayTypes } from "@/lib/types";
+import { Camp, Provider, campStatuses, dayLengths, holidayTypes } from "@/lib/types";
 
 type Filters = {
   search: string;
@@ -34,11 +34,6 @@ const numberFields = new Set<keyof Camp>(["age_min", "age_max"]);
 const dateFields = new Set<keyof Camp>(["start_date", "end_date", "last_checked_date"]);
 const timeFields = new Set<keyof Camp>(["start_time", "end_time"]);
 const longTextFields = new Set<keyof Camp>(["address", "notes"]);
-
-const adminNavLinks: AdminRoute[] = [
-  { href: "/camps/import", label: "Camps import" },
-  { href: "/providers", label: "Provider import" },
-];
 
 function formatLabel(field: string) {
   return field.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
@@ -209,13 +204,9 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
           </p>
         </div>
         <div className="hero-actions">
-          <nav className="hero-nav" aria-label="Admin import pages">
-            {adminNavLinks.map((link) => (
-              <Link key={link.href} className="button-link secondary" href={link.href}>
-                {link.label}
-              </Link>
-            ))}
-          </nav>
+          <Link className="button-link secondary" href="/camps/import">
+            Camps import
+          </Link>
           <button type="button" onClick={addCamp}>
             Add draft camp
           </button>
