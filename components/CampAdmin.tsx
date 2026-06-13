@@ -204,6 +204,9 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
           </p>
         </div>
         <div className="hero-actions">
+          <Link className="button-link" href="/providers">
+            Provider Import
+          </Link>
           <Link className="button-link" href="/camps/import">
             Camps import wizard
           </Link>
