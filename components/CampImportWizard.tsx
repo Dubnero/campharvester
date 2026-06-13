@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { campsToCsv } from "@/lib/campUtils";
 import {
   buildCampImportSummary,
@@ -9,6 +9,7 @@ import {
   getCampImportTemplateHeaders,
   type CampImportSummary,
 } from "@/lib/campImportWizardUtils";
+import { loadStoredProviders, type ProviderSource } from "@/lib/providerStorage";
 import { Camp, Provider } from "@/lib/types";
 
 type Props = {
@@ -29,8 +30,18 @@ function downloadText(filename: string, text: string) {
 export function CampImportWizard({ initialCamps, providers }: Props) {
   const [summary, setSummary] = useState<CampImportSummary | null>(null);
   const [acceptedCamps, setAcceptedCamps] = useState<Camp[]>(initialCamps);
+  const [validationProviders, setValidationProviders] = useState(providers);
+  const [providerSource, setProviderSource] = useState<ProviderSource>("mock providers");
   const [acceptedAt, setAcceptedAt] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const storedProviders = loadStoredProviders();
+    if (!storedProviders) return;
+
+    setValidationProviders(storedProviders);
+    setProviderSource("imported providers");
+  }, []);
 
   const canAccept = Boolean(summary && summary.totalRows > 0 && summary.errors.length === 0);
   const holidaySummary = useMemo(() => Object.entries(summary?.holidayTypeCounts ?? {}), [summary]);
@@ -42,7 +53,7 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
 
     const reader = new FileReader();
     reader.onload = () => {
-      setSummary(buildCampImportSummary(String(reader.result ?? ""), providers));
+      setSummary(buildCampImportSummary(String(reader.result ?? ""), validationProviders));
       if (fileInputRef.current) fileInputRef.current.value = "";
     };
     reader.readAsText(file);
@@ -85,7 +96,7 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
 
       <section className="stats-grid" aria-label="Import context">
         <article><span>Existing camps</span><strong>{initialCamps.length}</strong></article>
-        <article><span>Providers available</span><strong>{providers.length}</strong></article>
+        <article><span>Providers available</span><strong>{validationProviders.length}</strong><small>{providerSource}</small></article>
         <article><span>Rows parsed</span><strong>{summary?.totalRows ?? 0}</strong></article>
         <article><span>Valid rows</span><strong>{summary?.validRows ?? 0}</strong></article>
         <article><span>Rows with issues</span><strong>{summary?.invalidRows ?? 0}</strong></article>
@@ -95,7 +106,7 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
       <section className="panel import-panel">
         <div>
           <h2>1. Upload camps CSV</h2>
-          <p>Use camp_id or id for the camp identifier column. Provider IDs must already exist in mock provider data.</p>
+          <p>Use camp_id or id for the camp identifier column. Provider IDs must exist in the currently available imported providers or mock provider fallback.</p>
         </div>
         <label className="file-input">
           <span>Choose CSV file</span>
@@ -109,7 +120,7 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
             <div>
               <h2>2. Review import summary</h2>
               <p>
-                {summary.totalRows} rows parsed · {summary.providerCount} provider IDs referenced · review all issues
+                {summary.totalRows} rows parsed · {summary.providerCount} provider IDs referenced · validating against {validationProviders.length} {providerSource} · review all issues
                 before accepting.
               </p>
             </div>

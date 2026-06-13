@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { loadStoredProviders, saveStoredProviders } from "@/lib/providerStorage";
 import type { Camp, Provider } from "@/lib/types";
 
 type ProviderRow = Provider & {
@@ -29,15 +30,13 @@ type CsvValidation = {
 };
 
 const requiredProviderFields: Array<keyof Provider> = ["provider_id", "provider_name"];
-const providerCsvFields: Array<keyof Provider> = [
-  "provider_id",
-  "provider_name",
-  "website",
-  "email",
-  "phone",
-  "description",
-  "verified",
-  "featured",
+const optionalProviderCsvFields = [
+  { label: "website", headers: ["website"] },
+  { label: "email", headers: ["email", "primary_email"] },
+  { label: "phone", headers: ["phone", "primary_phone"] },
+  { label: "description", headers: ["description"] },
+  { label: "verified", headers: ["verified"] },
+  { label: "featured", headers: ["featured"] },
 ];
 const emptyValidation: CsvValidation = {
   providers: [],
@@ -107,9 +106,9 @@ function validateProviderCsv(text: string): CsvValidation {
   const headers = rows[0].map((header) => header.trim());
   const missingFields = requiredProviderFields.filter((field) => !headers.includes(field));
   const errors: string[] = missingFields.map((field) => `Missing required CSV header: ${field}.`);
-  const warnings: string[] = providerCsvFields
-    .filter((field) => !headers.includes(field) && !requiredProviderFields.includes(field))
-    .map((field) => `Optional CSV header not found: ${field}. Blank values will be used.`);
+  const warnings: string[] = optionalProviderCsvFields
+    .filter((field) => !field.headers.some((header) => headers.includes(header)))
+    .map((field) => `Optional CSV header not found: ${field.label}. Blank values will be used.`);
   const seenProviderIds = new Map<string, number>();
   const providers: Provider[] = [];
 
@@ -129,15 +128,18 @@ function validateProviderCsv(text: string): CsvValidation {
       seenProviderIds.set(providerId, rowNumber);
     }
 
-    if (!isValidEmail(record.email ?? "")) errors.push(`Row ${rowNumber}: invalid email format for "${record.email}".`);
+    const email = record.email || record.primary_email || "";
+    const phone = record.phone || record.primary_phone || "";
+
+    if (!isValidEmail(email)) errors.push(`Row ${rowNumber}: invalid email format for "${email}".`);
     if (!isValidWebsite(record.website ?? "")) errors.push(`Row ${rowNumber}: invalid website format for "${record.website}".`);
 
     providers.push({
       provider_id: providerId,
       provider_name: providerName,
       website: record.website ?? "",
-      email: record.email ?? "",
-      phone: record.phone ?? "",
+      email,
+      phone,
       description: record.description ?? "",
       verified: toBoolean(record.verified ?? ""),
       featured: toBoolean(record.featured ?? ""),
@@ -169,6 +171,7 @@ function flagClass(value: boolean, activeClass: string) {
 
 export function ProviderImport({ initialProviders, camps }: { initialProviders: Provider[]; camps: Camp[] }) {
   const [providers, setProviders] = useState(initialProviders);
+  const [loadedFromStorage, setLoadedFromStorage] = useState(false);
   const [filters, setFilters] = useState<Filters>({ search: "", county: "", activityCategory: "" });
   const [validation, setValidation] = useState<CsvValidation>(emptyValidation);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -192,6 +195,14 @@ export function ProviderImport({ initialProviders, camps }: { initialProviders: 
       return matchesSearch && matchesCounty && matchesActivity;
     });
   }, [filters, providerRows]);
+  useEffect(() => {
+    const storedProviders = loadStoredProviders();
+    if (!storedProviders) return;
+
+    setProviders(storedProviders);
+    setLoadedFromStorage(true);
+  }, []);
+
   const metrics = useMemo(
     () => ({
       total: providers.length,
@@ -216,7 +227,11 @@ export function ProviderImport({ initialProviders, camps }: { initialProviders: 
   }
 
   function acceptImport() {
-    if (validation.errors.length === 0 && validation.providers.length > 0) setProviders(validation.providers);
+    if (validation.errors.length === 0 && validation.providers.length > 0) {
+      setProviders(validation.providers);
+      saveStoredProviders(validation.providers);
+      setLoadedFromStorage(true);
+    }
   }
 
   return (
@@ -239,6 +254,12 @@ export function ProviderImport({ initialProviders, camps }: { initialProviders: 
         <article><span>Featured Providers</span><strong>{metrics.featured}</strong></article>
         <article><span>Providers Needing Review</span><strong>{metrics.needsReview}</strong></article>
       </section>
+
+      {loadedFromStorage ? (
+        <section className="panel import-feedback" aria-live="polite">
+          <p className="empty-state">Imported providers loaded from browser localStorage.</p>
+        </section>
+      ) : null}
 
       <section className="panel import-panel">
         <div>

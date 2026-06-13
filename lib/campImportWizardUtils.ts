@@ -1,4 +1,4 @@
-import { campFields, createBlankCamp, parseBoolean, parseCsv, requiredCampFields, validateCamp } from "./campUtils";
+import { campFields, createBlankCamp, normalizeDayLength, parseBoolean, parseCsv, requiredCampFields, validateCamp } from "./campUtils";
 import { Camp, Provider } from "./types";
 
 export type CampImportRow = {
@@ -98,7 +98,7 @@ export function buildCampImportSummary(csvText: string, providers: Provider[]): 
       } else if (field === "verified" || field === "featured") {
         (camp[field] as boolean) = parseBoolean(rawValue);
       } else {
-        (camp[field] as string) = String(rawValue);
+        (camp[field] as string) = field === "half_day_or_full_day" ? normalizeDayLength(rawValue) ?? String(rawValue) : String(rawValue);
       }
     });
 
