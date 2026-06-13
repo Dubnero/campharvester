@@ -45,6 +45,15 @@ Build for production:
 npm run build
 ```
 
+## Browser localStorage persistence
+
+CampHarvester uses browser `localStorage` to make accepted admin imports available across page loads without a backend:
+
+- Imported providers are stored under `campharvester.providers` after a provider CSV import is accepted.
+- Imported camps are stored under `campharvester.camps` after a Camps Import Wizard import is accepted.
+- The dashboard automatically prefers imported camp data from `campharvester.camps` when it exists, so metrics, search, filters and the camp table reflect the imported dataset.
+- If no imported camps are stored, the dashboard falls back to the bundled mock camp data. Clearing `campharvester.camps` or all site localStorage reverts the dashboard to mock camp data.
+
 ## Data model
 
 Providers are stored locally in mock data with these fields:
