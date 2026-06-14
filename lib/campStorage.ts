@@ -1,3 +1,4 @@
+import { normalizeDateFieldValue, omitNullishDateFields } from "./dateNormalization";
 import { campStatuses, dayLengths, holidayTypes, type Camp } from "./types";
 
 export const campStorageKey = "campharvester.camps";
@@ -12,7 +13,7 @@ export function loadStoredCamps(): Camp[] | null {
     const parsed = JSON.parse(storedCamps);
     if (!Array.isArray(parsed)) return null;
 
-    const camps = parsed.filter(isCampRecord);
+    const camps = parsed.map(normalizeCampRecord).filter(isCampRecord);
     return camps.length > 0 ? camps : null;
   } catch (error) {
     console.error("Failed to load stored CampHarvester camps.", error);
@@ -23,7 +24,7 @@ export function loadStoredCamps(): Camp[] | null {
 export function saveStoredCamps(camps: Camp[]) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(campStorageKey, JSON.stringify(camps));
+    window.localStorage.setItem(campStorageKey, JSON.stringify(camps.map(normalizeCampRecord)));
   } catch (error) {
     console.error("Failed to save CampHarvester camps.", error);
   }
@@ -36,6 +37,28 @@ export function clearStoredCamps() {
   } catch (error) {
     console.error("Failed to clear stored CampHarvester camps.", error);
   }
+}
+
+function normalizeCampRecord(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+
+  const camp = value as Partial<Camp>;
+
+  return {
+    ...camp,
+    start_date: normalizeDateFieldValue(camp.start_date) ?? "",
+    end_date: normalizeDateFieldValue(camp.end_date) ?? "",
+    last_checked: normalizeDateFieldValue(camp.last_checked) ?? "",
+  };
+}
+
+export function prepareCampForSupabase(camp: Camp) {
+  return omitNullishDateFields({
+    ...camp,
+    start_date: normalizeDateFieldValue(camp.start_date),
+    end_date: normalizeDateFieldValue(camp.end_date),
+    last_checked: normalizeDateFieldValue(camp.last_checked),
+  });
 }
 
 function isCampRecord(value: unknown): value is Camp {
