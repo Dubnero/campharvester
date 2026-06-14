@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { loadStoredCamps } from "@/lib/campStorage";
 import { loadStoredProviders } from "@/lib/providerStorage";
+import { getCamps, getProviders } from "@/lib/dataRepository";
 import { buildPublicCamps, findPublicCamp, formatAgeRange, formatDateRange, formatTimeRange } from "@/lib/publicDirectoryUtils";
 import type { Camp, Provider } from "@/lib/types";
 
@@ -14,8 +15,23 @@ export function PublicCampDetails({ campId, initialCamps, initialProviders }: Pr
   const [providers, setProviders] = useState(initialProviders);
 
   useEffect(() => {
-    setProviders(loadStoredProviders() ?? initialProviders);
-    setCamps(loadStoredCamps() ?? initialCamps);
+    let active = true;
+
+    async function loadDetailsData() {
+      const [remoteProviders, remoteCamps] = await Promise.all([getProviders(), getCamps()]);
+      if (!active) return;
+
+      if (!remoteProviders.error && !remoteCamps.error && (remoteProviders.data.length > 0 || remoteCamps.data.length > 0)) {
+        setProviders(remoteProviders.data.length > 0 ? remoteProviders.data : initialProviders);
+        setCamps(remoteCamps.data.length > 0 ? remoteCamps.data : initialCamps);
+      } else {
+        setProviders(loadStoredProviders() ?? initialProviders);
+        setCamps(loadStoredCamps() ?? initialCamps);
+      }
+    }
+
+    loadDetailsData();
+    return () => { active = false; };
   }, [initialCamps, initialProviders]);
 
   const camp = useMemo(() => findPublicCamp(buildPublicCamps(camps, providers), campId), [campId, camps, providers]);
