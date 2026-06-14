@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { getProviders, upsertProviders } from "@/lib/dataRepository";
+import { migrateLocalStorageToSupabaseIfEmpty } from "@/lib/localStorageMigration";
 import { loadStoredProviders, saveStoredProviders } from "@/lib/providerStorage";
 import type { Camp, Provider } from "@/lib/types";
 
@@ -171,7 +173,9 @@ function flagClass(value: boolean, activeClass: string) {
 
 export function ProviderImport({ initialProviders, camps }: { initialProviders: Provider[]; camps: Camp[] }) {
   const [providers, setProviders] = useState(initialProviders);
-  const [loadedFromStorage, setLoadedFromStorage] = useState(false);
+  const [dataSourceMessage, setDataSourceMessage] = useState("Loading providers from Supabase…");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [filters, setFilters] = useState<Filters>({ search: "", county: "", activityCategory: "" });
   const [validation, setValidation] = useState<CsvValidation>(emptyValidation);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -196,11 +200,27 @@ export function ProviderImport({ initialProviders, camps }: { initialProviders: 
     });
   }, [filters, providerRows]);
   useEffect(() => {
-    const storedProviders = loadStoredProviders();
-    if (!storedProviders) return;
+    let active = true;
 
-    setProviders(storedProviders);
-    setLoadedFromStorage(true);
+    async function loadProviderData() {
+      setIsLoading(true);
+      await migrateLocalStorageToSupabaseIfEmpty();
+      const remoteProviders = await getProviders();
+      if (!active) return;
+
+      if (!remoteProviders.error && remoteProviders.data.length > 0) {
+        setProviders(remoteProviders.data);
+        setDataSourceMessage("Showing Supabase data.");
+      } else {
+        const storedProviders = loadStoredProviders();
+        if (storedProviders) setProviders(storedProviders);
+        setDataSourceMessage(`Showing local fallback data${remoteProviders.error ? ` (${remoteProviders.error})` : ""}.`);
+      }
+      setIsLoading(false);
+    }
+
+    loadProviderData();
+    return () => { active = false; };
   }, []);
 
   const metrics = useMemo(
@@ -226,21 +246,30 @@ export function ProviderImport({ initialProviders, camps }: { initialProviders: 
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  function acceptImport() {
-    if (validation.errors.length === 0 && validation.providers.length > 0) {
+  async function acceptImport() {
+    if (validation.errors.length > 0 || validation.providers.length === 0) return;
+
+    setIsSaving(true);
+    saveStoredProviders(validation.providers);
+    const upsertResult = await upsertProviders(validation.providers);
+    if (upsertResult.error) {
       setProviders(validation.providers);
-      saveStoredProviders(validation.providers);
-      setLoadedFromStorage(true);
+      setDataSourceMessage(`Showing local fallback data (${upsertResult.error}).`);
+    } else {
+      const refreshedProviders = await getProviders();
+      setProviders(refreshedProviders.error ? validation.providers : refreshedProviders.data);
+      setDataSourceMessage(refreshedProviders.error ? `Showing local fallback data (${refreshedProviders.error}).` : "Showing Supabase data.");
     }
+    setIsSaving(false);
   }
 
   return (
     <main className="app-shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">Provider import · local mock data only</p>
+          <p className="eyebrow">Provider import · Supabase primary data</p>
           <h1>Provider Import</h1>
-          <p>Upload, validate and review provider CSV data separately from camp listings without backend integrations.</p>
+          <p>Upload, validate and review provider CSV data, then upsert accepted rows to Supabase with localStorage fallback.</p>
         </div>
         <div className="hero-actions">
           <Link className="button-link secondary" href="/">Dashboard</Link>
@@ -255,11 +284,9 @@ export function ProviderImport({ initialProviders, camps }: { initialProviders: 
         <article><span>Providers Needing Review</span><strong>{metrics.needsReview}</strong></article>
       </section>
 
-      {loadedFromStorage ? (
-        <section className="panel import-feedback" aria-live="polite">
-          <p className="empty-state">Imported providers loaded from browser localStorage.</p>
-        </section>
-      ) : null}
+      <section className="panel import-feedback data-source-banner" aria-live="polite">
+        <p className="empty-state">{isLoading ? "Loading providers from Supabase…" : dataSourceMessage}</p>
+      </section>
 
       <section className="panel import-panel">
         <div>
@@ -279,8 +306,8 @@ export function ProviderImport({ initialProviders, camps }: { initialProviders: 
               <h2>Validation results</h2>
               <p>{validation.summary.rows} rows checked · {validation.summary.errorCount} errors · {validation.summary.warningCount} warnings</p>
             </div>
-            <button type="button" onClick={acceptImport} disabled={validation.errors.length > 0 || validation.providers.length === 0}>
-              Accept import
+            <button type="button" onClick={acceptImport} disabled={isSaving || validation.errors.length > 0 || validation.providers.length === 0}>
+              {isSaving ? "Saving…" : "Accept import"}
             </button>
           </div>
           <div className="summary-grid">

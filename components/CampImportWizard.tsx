@@ -4,6 +4,8 @@ import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { campsToCsv } from "@/lib/campUtils";
 import { saveStoredCamps } from "@/lib/campStorage";
+import { getCamps, getProviders, upsertCamps } from "@/lib/dataRepository";
+import { migrateLocalStorageToSupabaseIfEmpty } from "@/lib/localStorageMigration";
 import {
   buildCampImportSummary,
   campsFromImportSummary,
@@ -34,14 +36,35 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
   const [validationProviders, setValidationProviders] = useState(providers);
   const [providerSource, setProviderSource] = useState<ProviderSource>("mock providers");
   const [acceptedAt, setAcceptedAt] = useState("");
+  const [dataSourceMessage, setDataSourceMessage] = useState("Loading Supabase data…");
+  const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const storedProviders = loadStoredProviders();
-    if (!storedProviders) return;
+    let active = true;
 
-    setValidationProviders(storedProviders);
-    setProviderSource("imported providers");
+    async function loadImportContext() {
+      await migrateLocalStorageToSupabaseIfEmpty();
+      const [remoteProviders, remoteCamps] = await Promise.all([getProviders(), getCamps()]);
+      if (!active) return;
+
+      if (!remoteProviders.error && remoteProviders.data.length > 0) {
+        setValidationProviders(remoteProviders.data);
+        setProviderSource("imported providers");
+      } else {
+        const storedProviders = loadStoredProviders();
+        if (storedProviders) {
+          setValidationProviders(storedProviders);
+          setProviderSource("imported providers");
+        }
+      }
+
+      if (!remoteCamps.error && remoteCamps.data.length > 0) setAcceptedCamps(remoteCamps.data);
+      setDataSourceMessage(!remoteProviders.error && !remoteCamps.error ? "Showing Supabase data." : `Showing local fallback data (${remoteProviders.error ?? remoteCamps.error}).`);
+    }
+
+    loadImportContext();
+    return () => { active = false; };
   }, []);
 
   const canAccept = Boolean(summary && summary.totalRows > 0 && summary.errors.length === 0);
@@ -60,12 +83,22 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
     reader.readAsText(file);
   }
 
-  function handleAcceptImport() {
+  async function handleAcceptImport() {
     if (!summary || summary.errors.length > 0) return;
     const acceptedImportCamps = campsFromImportSummary(summary);
-    setAcceptedCamps(acceptedImportCamps);
+    setIsSaving(true);
     saveStoredCamps(acceptedImportCamps);
+    const upsertResult = await upsertCamps(acceptedImportCamps);
+    if (upsertResult.error) {
+      setAcceptedCamps(acceptedImportCamps);
+      setDataSourceMessage(`Showing local fallback data (${upsertResult.error}).`);
+    } else {
+      const refreshedCamps = await getCamps();
+      setAcceptedCamps(refreshedCamps.error ? acceptedImportCamps : refreshedCamps.data);
+      setDataSourceMessage(refreshedCamps.error ? `Showing local fallback data (${refreshedCamps.error}).` : "Showing Supabase data.");
+    }
     setAcceptedAt(new Date().toLocaleString());
+    setIsSaving(false);
   }
 
   function handleDownloadTemplate() {
@@ -97,6 +130,8 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
         </div>
       </header>
 
+      <section className="panel import-feedback data-source-banner" aria-live="polite"><p>{dataSourceMessage}</p></section>
+
       <section className="stats-grid" aria-label="Import context">
         <article><span>Existing camps</span><strong>{initialCamps.length}</strong></article>
         <article><span>Providers available</span><strong>{validationProviders.length}</strong><small>{providerSource}</small></article>
@@ -127,8 +162,8 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
                 before accepting.
               </p>
             </div>
-            <button type="button" disabled={!canAccept} onClick={handleAcceptImport}>
-              Accept import
+            <button type="button" disabled={!canAccept || isSaving} onClick={handleAcceptImport}>
+              {isSaving ? "Saving…" : "Accept import"}
             </button>
           </div>
 
