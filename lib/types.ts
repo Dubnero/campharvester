@@ -32,9 +32,9 @@ export type Provider = {
   status?: string;
   verified: boolean;
   featured: boolean;
-  last_checked?: string;
+  last_checked?: string | null;
   notes?: string;
-  created_at?: string;
+  created_at?: string | null;
 };
 
 export type Camp = {

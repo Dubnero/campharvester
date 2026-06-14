@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { getProviders, upsertProviders } from "@/lib/dataRepository";
+import { normalizeDateFieldValue } from "@/lib/dateNormalization";
 import { migrateLocalStorageToSupabaseIfEmpty } from "@/lib/localStorageMigration";
 import { loadStoredProviders, saveStoredProviders } from "@/lib/providerStorage";
 import type { Camp, Provider } from "@/lib/types";
@@ -158,9 +159,9 @@ function validateProviderCsv(text: string): CsvValidation {
       status: record.status ?? "",
       verified: toBoolean(record.verified ?? ""),
       featured: toBoolean(record.featured ?? ""),
-      last_checked: record.last_checked ?? "",
+      last_checked: normalizeDateFieldValue(record.last_checked),
       notes: record.notes ?? "",
-      created_at: record.created_at ?? "",
+      created_at: normalizeDateFieldValue(record.created_at),
     });
   });
 

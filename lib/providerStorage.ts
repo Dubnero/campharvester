@@ -1,3 +1,4 @@
+import { normalizeEmptyDateFields } from "./dateNormalization";
 import type { Provider } from "./types";
 
 export const providerStorageKey = "campharvester.providers";
@@ -25,7 +26,7 @@ export function loadStoredProviders(): Provider[] | null {
 export function saveStoredProviders(providers: Provider[]) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(providerStorageKey, JSON.stringify(providers));
+    window.localStorage.setItem(providerStorageKey, JSON.stringify(providers.map(normalizeProviderRecord)));
   } catch (error) {
     console.error("Failed to save CampHarvester providers.", error);
   }
@@ -36,11 +37,15 @@ function normalizeProviderRecord(value: unknown): unknown {
 
   const legacyProvider = value as Partial<Provider> & { email?: string; phone?: string };
 
-  return {
+  return normalizeEmptyDateFields({
     ...legacyProvider,
     primary_email: legacyProvider.primary_email ?? legacyProvider.email ?? "",
     primary_phone: legacyProvider.primary_phone ?? legacyProvider.phone ?? "",
-  };
+  });
+}
+
+export function prepareProviderForSupabase(provider: Provider) {
+  return normalizeEmptyDateFields({ ...provider });
 }
 
 function isProviderRecord(value: unknown): value is Provider {
