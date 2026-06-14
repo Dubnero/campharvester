@@ -381,7 +381,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
                     <td><strong>{camp.camp_name}</strong><small>{camp.start_date} → {camp.end_date}</small></td>
                     <td>
                       <strong>{provider?.provider_name ?? "Unknown provider"}</strong>
-                      <small>{provider?.email ?? camp.provider_id}</small>
+                      <small>{provider?.primary_email ?? camp.provider_id}</small>
                     </td>
                     <td>{camp.town}</td>
                     <td>{camp.county}</td>
@@ -417,8 +417,8 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
             </div>
             <div className="provider-meta">
               <a href={selectedProvider.website}>{selectedProvider.website}</a>
-              <span>{selectedProvider.email}</span>
-              <span>{selectedProvider.phone}</span>
+              <span>{[selectedProvider.primary_email, selectedProvider.secondary_email].filter(Boolean).join(", ")}</span>
+              <span>{[selectedProvider.primary_phone, selectedProvider.secondary_phone].filter(Boolean).join(", ")}</span>
               <span className="flags">
                 {selectedProvider.verified ? <span className="flag verified">Verified provider</span> : null}
                 {selectedProvider.featured ? <span className="flag featured">Featured provider</span> : null}

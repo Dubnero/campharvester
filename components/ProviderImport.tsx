@@ -8,7 +8,7 @@ import type { Camp, Provider } from "@/lib/types";
 type ProviderRow = Provider & {
   counties: string[];
   activityCategories: string[];
-  status: "Ready" | "Needs review";
+  reviewStatus: "Ready" | "Needs review";
 };
 
 type Filters = {
@@ -32,8 +32,10 @@ type CsvValidation = {
 const requiredProviderFields: Array<keyof Provider> = ["provider_id", "provider_name"];
 const optionalProviderCsvFields = [
   { label: "website", headers: ["website"] },
-  { label: "email", headers: ["email", "primary_email"] },
-  { label: "phone", headers: ["phone", "primary_phone"] },
+  { label: "primary_email", headers: ["primary_email", "email"] },
+  { label: "secondary_email", headers: ["secondary_email"] },
+  { label: "primary_phone", headers: ["primary_phone", "phone"] },
+  { label: "secondary_phone", headers: ["secondary_phone"] },
   { label: "description", headers: ["description"] },
   { label: "verified", headers: ["verified"] },
   { label: "featured", headers: ["featured"] },
@@ -83,8 +85,8 @@ function toBoolean(value: string) {
   return ["true", "yes", "1", "verified", "featured"].includes(value.trim().toLowerCase());
 }
 
-function isValidEmail(email: string) {
-  return email.length === 0 || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+function isValidEmail(primaryEmail: string) {
+  return primaryEmail.length === 0 || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(primaryEmail);
 }
 
 function isValidWebsite(website: string) {
@@ -95,6 +97,10 @@ function isValidWebsite(website: string) {
   } catch {
     return false;
   }
+}
+
+function isPresent(value: string | undefined): value is string {
+  return Boolean(value);
 }
 
 function validateProviderCsv(text: string): CsvValidation {
@@ -128,21 +134,31 @@ function validateProviderCsv(text: string): CsvValidation {
       seenProviderIds.set(providerId, rowNumber);
     }
 
-    const email = record.email || record.primary_email || "";
-    const phone = record.phone || record.primary_phone || "";
+    const primaryEmail = record.primary_email || record.email || "";
+    const primaryPhone = record.primary_phone || record.phone || "";
 
-    if (!isValidEmail(email)) errors.push(`Row ${rowNumber}: invalid email format for "${email}".`);
+    if (!isValidEmail(primaryEmail)) errors.push(`Row ${rowNumber}: invalid email format for "${primaryEmail}".`);
     if (!isValidWebsite(record.website ?? "")) errors.push(`Row ${rowNumber}: invalid website format for "${record.website}".`);
 
     providers.push({
       provider_id: providerId,
       provider_name: providerName,
       website: record.website ?? "",
-      email,
-      phone,
+      source_url: record.source_url ?? "",
+      primary_email: primaryEmail,
+      secondary_email: record.secondary_email ?? "",
+      primary_phone: primaryPhone,
+      secondary_phone: record.secondary_phone ?? "",
       description: record.description ?? "",
+      primary_county: record.primary_county ?? "",
+      activity_category: record.activity_category ?? "",
+      provider_type: record.provider_type ?? "",
+      status: record.status ?? "",
       verified: toBoolean(record.verified ?? ""),
       featured: toBoolean(record.featured ?? ""),
+      last_checked: record.last_checked ?? "",
+      notes: record.notes ?? "",
+      created_at: record.created_at ?? "",
     });
   });
 
@@ -157,11 +173,13 @@ function validateProviderCsv(text: string): CsvValidation {
 function getProviderRows(providers: Provider[], camps: Camp[]): ProviderRow[] {
   return providers.map((provider) => {
     const providerCamps = camps.filter((camp) => camp.provider_id === provider.provider_id);
-    const counties = Array.from(new Set(providerCamps.map((camp) => camp.county))).sort();
-    const activityCategories = Array.from(new Set(providerCamps.map((camp) => camp.activity_type))).sort();
-    const status = provider.verified && isValidEmail(provider.email) && isValidWebsite(provider.website) ? "Ready" : "Needs review";
+    const counties = Array.from(new Set([provider.primary_county, ...providerCamps.map((camp) => camp.county)].filter(isPresent))).sort();
+    const activityCategories = Array.from(
+      new Set([provider.activity_category, ...providerCamps.map((camp) => camp.activity_type)].filter(isPresent)),
+    ).sort();
+    const reviewStatus = provider.verified && isValidEmail(provider.primary_email) && isValidWebsite(provider.website) ? "Ready" : "Needs review";
 
-    return { ...provider, counties, activityCategories, status };
+    return { ...provider, counties, activityCategories, reviewStatus };
   });
 }
 
@@ -187,7 +205,7 @@ export function ProviderImport({ initialProviders, camps }: { initialProviders: 
     return providerRows.filter((provider) => {
       const matchesSearch =
         search.length === 0 ||
-        [provider.provider_name, provider.provider_id, provider.email, provider.website]
+        [provider.provider_name, provider.provider_id, provider.primary_email, provider.secondary_email ?? "", provider.website]
           .some((value) => value.toLowerCase().includes(search));
       const matchesCounty = filters.county.length === 0 || provider.counties.includes(filters.county);
       const matchesActivity =
@@ -208,7 +226,7 @@ export function ProviderImport({ initialProviders, camps }: { initialProviders: 
       total: providers.length,
       verified: providers.filter((provider) => provider.verified).length,
       featured: providers.filter((provider) => provider.featured).length,
-      needsReview: providerRows.filter((provider) => provider.status === "Needs review").length,
+      needsReview: providerRows.filter((provider) => provider.reviewStatus === "Needs review").length,
     }),
     [providerRows, providers],
   );
@@ -315,10 +333,10 @@ export function ProviderImport({ initialProviders, camps }: { initialProviders: 
                   <td>{provider.counties.join(", ") || "—"}</td>
                   <td>{provider.activityCategories.join(", ") || "—"}</td>
                   <td><a href={provider.website}>{provider.website || "—"}</a></td>
-                  <td>{provider.email || "—"}</td>
+                  <td>{[provider.primary_email, provider.secondary_email].filter(Boolean).join(", ") || "—"}</td>
                   <td><span className={flagClass(provider.verified, "verified")}>{provider.verified ? "Yes" : "No"}</span></td>
                   <td><span className={flagClass(provider.featured, "featured")}>{provider.featured ? "Yes" : "No"}</span></td>
-                  <td><span className={provider.status === "Ready" ? "badge success" : "badge warning"}>{provider.status}</span></td>
+                  <td><span className={provider.reviewStatus === "Ready" ? "badge success" : "badge warning"}>{provider.reviewStatus}</span></td>
                 </tr>
               ))}
             </tbody>

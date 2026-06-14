@@ -59,10 +59,10 @@ CampHarvester uses browser `localStorage` to make accepted admin imports availab
 Providers are stored locally in mock data with these fields:
 
 ```text
-provider_id, provider_name, website, email, phone, description, verified, featured
+provider_id, provider_name, website, source_url, primary_email, secondary_email, primary_phone, secondary_phone, description, primary_county, activity_category, provider_type, status, verified, featured, last_checked, notes, created_at
 ```
 
-Camps store camp-specific listing details and reference providers by `provider_id`; provider names, websites, emails and flags are resolved through that relationship in the UI.
+Camps store camp-specific listing details and reference providers by `provider_id`; provider names, websites, primary emails and flags are resolved through that relationship in the UI.
 
 ## CSV import format
 
