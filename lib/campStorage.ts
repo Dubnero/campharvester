@@ -14,19 +14,28 @@ export function loadStoredCamps(): Camp[] | null {
 
     const camps = parsed.filter(isCampRecord);
     return camps.length > 0 ? camps : null;
-  } catch {
+  } catch (error) {
+    console.error("Failed to load stored CampHarvester camps.", error);
     return null;
   }
 }
 
 export function saveStoredCamps(camps: Camp[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(campStorageKey, JSON.stringify(camps));
+  try {
+    window.localStorage.setItem(campStorageKey, JSON.stringify(camps));
+  } catch (error) {
+    console.error("Failed to save CampHarvester camps.", error);
+  }
 }
 
 export function clearStoredCamps() {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(campStorageKey);
+  try {
+    window.localStorage.removeItem(campStorageKey);
+  } catch (error) {
+    console.error("Failed to clear stored CampHarvester camps.", error);
+  }
 }
 
 function isCampRecord(value: unknown): value is Camp {

@@ -20,11 +20,21 @@ export type Provider = {
   provider_id: string;
   provider_name: string;
   website: string;
-  email: string;
-  phone: string;
+  source_url?: string;
+  primary_email: string;
+  secondary_email?: string;
+  primary_phone: string;
+  secondary_phone?: string;
   description: string;
+  primary_county?: string;
+  activity_category?: string;
+  provider_type?: string;
+  status?: string;
   verified: boolean;
   featured: boolean;
+  last_checked?: string;
+  notes?: string;
+  created_at?: string;
 };
 
 export type Camp = {

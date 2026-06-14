@@ -32,7 +32,7 @@ export function PublicCampDetails({ campId, initialCamps, initialProviders }: Pr
     );
   }
 
-  const actionHref = camp.booking_url || camp.provider?.website || "mailto:" + (camp.provider?.email ?? "");
+  const actionHref = camp.booking_url || camp.provider?.website || "mailto:" + (camp.provider?.primary_email ?? "");
   const actionLabel = camp.booking_url ? "Book Camp" : "Contact Provider";
 
   return (

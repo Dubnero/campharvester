@@ -14,16 +14,33 @@ export function loadStoredProviders(): Provider[] | null {
     const parsed = JSON.parse(storedProviders);
     if (!Array.isArray(parsed)) return null;
 
-    const providers = parsed.filter(isProviderRecord);
+    const providers = parsed.map(normalizeProviderRecord).filter(isProviderRecord);
     return providers.length > 0 ? providers : null;
-  } catch {
+  } catch (error) {
+    console.error("Failed to load stored CampHarvester providers.", error);
     return null;
   }
 }
 
 export function saveStoredProviders(providers: Provider[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(providerStorageKey, JSON.stringify(providers));
+  try {
+    window.localStorage.setItem(providerStorageKey, JSON.stringify(providers));
+  } catch (error) {
+    console.error("Failed to save CampHarvester providers.", error);
+  }
+}
+
+function normalizeProviderRecord(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+
+  const legacyProvider = value as Partial<Provider> & { email?: string; phone?: string };
+
+  return {
+    ...legacyProvider,
+    primary_email: legacyProvider.primary_email ?? legacyProvider.email ?? "",
+    primary_phone: legacyProvider.primary_phone ?? legacyProvider.phone ?? "",
+  };
 }
 
 function isProviderRecord(value: unknown): value is Provider {
