@@ -1,3 +1,5 @@
+import { prepareCampForSupabase } from "./campStorage";
+import { prepareProviderForSupabase } from "./providerStorage";
 import { supabase, getSupabaseConfigError } from "./supabase";
 import type { Camp, Provider } from "./types";
 
@@ -26,7 +28,7 @@ const providerColumns = [
 ] as const satisfies readonly (keyof Provider)[];
 
 const campColumns = [
-  "id",
+  "camp_id",
   "provider_id",
   "camp_name",
   "county",
@@ -49,6 +51,7 @@ const campColumns = [
   "featured",
   "source_url",
   "last_checked",
+  "created_at",
 ] as const satisfies readonly (keyof Camp)[];
 
 const providerSelect = providerColumns.join(", ");
@@ -86,7 +89,7 @@ function toProviderRow(provider: Provider): ProviderRow {
 
 function toCampRow(camp: Camp): CampRow {
   return {
-    id: camp.id,
+    camp_id: camp.camp_id,
     provider_id: camp.provider_id,
     camp_name: camp.camp_name,
     county: camp.county,
@@ -109,6 +112,7 @@ function toCampRow(camp: Camp): CampRow {
     featured: camp.featured,
     source_url: camp.source_url,
     last_checked: camp.last_checked,
+    created_at: camp.created_at,
   };
 }
 
@@ -124,7 +128,7 @@ export async function upsertProviders(providers: Provider[]): Promise<Repository
   const missingConfig = configError();
   if (!supabase || missingConfig) return { data: [], error: missingConfig };
 
-  const providerRows = providers.map(toProviderRow);
+  const providerRows = providers.map((provider) => toProviderRow(prepareProviderForSupabase(provider)));
   const { data, error } = await supabase.from("providers").upsert(providerRows, { onConflict: "provider_id" }).select(providerSelect);
   return { data: (data ?? []) as unknown as Provider[], error: error?.message ?? null };
 }
@@ -141,7 +145,7 @@ export async function upsertCamps(camps: Camp[]): Promise<RepositoryResult<Camp[
   const missingConfig = configError();
   if (!supabase || missingConfig) return { data: [], error: missingConfig };
 
-  const campRows = camps.map(toCampRow);
-  const { data, error } = await supabase.from("camps").upsert(campRows, { onConflict: "id" }).select(campSelect);
+  const campRows = camps.map((camp) => toCampRow(prepareCampForSupabase(camp) as Camp));
+  const { data, error } = await supabase.from("camps").upsert(campRows, { onConflict: "camp_id" }).select(campSelect);
   return { data: (data ?? []) as unknown as Camp[], error: error?.message ?? null };
 }

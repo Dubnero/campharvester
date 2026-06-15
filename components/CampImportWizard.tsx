@@ -144,7 +144,7 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
       <section className="panel import-panel">
         <div>
           <h2>1. Upload camps CSV</h2>
-          <p>Use camp_id or id for the camp identifier column. Provider IDs must exist in the currently available imported providers or mock provider fallback.</p>
+          <p>Use camp_id for the camp identifier column. Provider IDs must exist in the currently available imported providers or mock provider fallback.</p>
         </div>
         <label className="file-input">
           <span>Choose CSV file</span>
@@ -201,9 +201,9 @@ export function CampImportWizard({ initialCamps, providers }: Props) {
               </thead>
               <tbody>
                 {summary.rows.map(({ rowNumber, camp }) => (
-                  <tr key={`${rowNumber}-${camp.id}`}>
+                  <tr key={`${rowNumber}-${camp.camp_id}`}>
                     <td>{rowNumber}</td>
-                    <td>{camp.id}</td>
+                    <td>{camp.camp_id}</td>
                     <td><strong>{camp.camp_name}</strong><small>{camp.town || camp.address}, {camp.county}</small></td>
                     <td>{camp.provider_id}</td>
                     <td>{camp.holiday_type}</td>

@@ -49,6 +49,7 @@ function normalizeCampRecord(value: unknown): unknown {
     start_date: normalizeDateFieldValue(camp.start_date) ?? "",
     end_date: normalizeDateFieldValue(camp.end_date) ?? "",
     last_checked: normalizeDateFieldValue(camp.last_checked) ?? "",
+    created_at: normalizeDateFieldValue(camp.created_at),
   };
 }
 
@@ -58,6 +59,7 @@ export function prepareCampForSupabase(camp: Camp) {
     start_date: normalizeDateFieldValue(camp.start_date),
     end_date: normalizeDateFieldValue(camp.end_date),
     last_checked: normalizeDateFieldValue(camp.last_checked),
+    created_at: normalizeDateFieldValue(camp.created_at),
   });
 }
 
@@ -66,8 +68,8 @@ function isCampRecord(value: unknown): value is Camp {
   const camp = value as Partial<Camp>;
 
   return (
-    typeof camp.id === "string" &&
-    camp.id.trim().length > 0 &&
+    typeof camp.camp_id === "string" &&
+    camp.camp_id.trim().length > 0 &&
     typeof camp.provider_id === "string" &&
     camp.provider_id.trim().length > 0 &&
     typeof camp.camp_name === "string" &&

@@ -1,5 +1,5 @@
 export const providerDateFields = ["last_checked", "created_at"] as const;
-export const campDateFields = ["start_date", "end_date", "last_checked"] as const;
+export const campDateFields = ["start_date", "end_date", "last_checked", "created_at"] as const;
 
 const dateFieldNames = new Set<string>([...providerDateFields, ...campDateFields]);
 

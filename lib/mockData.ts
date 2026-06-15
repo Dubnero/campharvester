@@ -105,7 +105,7 @@ export const mockProviders: Provider[] = [
 
 export const mockCamps: Camp[] = [
   {
-    id: "camp-001",
+    camp_id: "camp-001",
     provider_id: "provider-bray-wanderers",
     camp_name: "Bray Wanderers Summer Football Camp",
     town: "Bray",
@@ -130,7 +130,7 @@ export const mockCamps: Camp[] = [
     featured: false,
   },
   {
-    id: "camp-002",
+    camp_id: "camp-002",
     provider_id: "provider-gaiety-young-performers",
     camp_name: "Gaiety Young Performers Easter Drama Workshop",
     town: "Temple Bar",
@@ -155,7 +155,7 @@ export const mockCamps: Camp[] = [
     featured: false,
   },
   {
-    id: "camp-003",
+    camp_id: "camp-003",
     provider_id: "provider-whizzkids",
     camp_name: "WhizzKids Coding Camp UCD",
     town: "Belfield",
@@ -180,7 +180,7 @@ export const mockCamps: Camp[] = [
     featured: false,
   },
   {
-    id: "camp-004",
+    camp_id: "camp-004",
     provider_id: "provider-mermaid-arts",
     camp_name: "Mermaid Halloween Art Lab",
     town: "Bray",
@@ -205,7 +205,7 @@ export const mockCamps: Camp[] = [
     featured: false,
   },
   {
-    id: "camp-005",
+    camp_id: "camp-005",
     provider_id: "provider-kippure-estate",
     camp_name: "Kippure Outdoor Adventure Summer Camp",
     town: "Blessington",
@@ -230,7 +230,7 @@ export const mockCamps: Camp[] = [
     featured: false,
   },
   {
-    id: "camp-006",
+    camp_id: "camp-006",
     provider_id: "provider-anyone4science",
     camp_name: "Anyone 4 Science Easter Experiments Camp",
     town: "Dundrum",
@@ -255,7 +255,7 @@ export const mockCamps: Camp[] = [
     featured: false,
   },
   {
-    id: "camp-007",
+    camp_id: "camp-007",
     provider_id: "provider-squirrel-scramble",
     camp_name: "Squirrel Scramble Halloween Adventure Days",
     town: "Kilruddery, Bray",
@@ -280,7 +280,7 @@ export const mockCamps: Camp[] = [
     featured: false,
   },
   {
-    id: "camp-008",
+    camp_id: "camp-008",
     provider_id: "provider-ark-dublin",
     camp_name: "The Ark Summer Creative Arts Camp",
     town: "Temple Bar",
@@ -305,7 +305,7 @@ export const mockCamps: Camp[] = [
     featured: false,
   },
   {
-    id: "camp-009",
+    camp_id: "camp-009",
     provider_id: "provider-shoreline-greystones",
     camp_name: "Shoreline Greystones Multi-Activity Camp",
     town: "Greystones",
@@ -330,7 +330,7 @@ export const mockCamps: Camp[] = [
     featured: false,
   },
   {
-    id: "camp-010",
+    camp_id: "camp-010",
     provider_id: "provider-stella-football",
     camp_name: "Stella Maris Summer Football Skills Camp",
     town: "Drumcondra",

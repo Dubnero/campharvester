@@ -38,7 +38,7 @@ export type Provider = {
 };
 
 export type Camp = {
-  id: string;
+  camp_id: string;
   provider_id: string;
   camp_name: string;
   county: string;
@@ -60,7 +60,8 @@ export type Camp = {
   verified: boolean;
   featured: boolean;
   source_url: string;
-  last_checked: string;
+  last_checked: string | null;
+  created_at?: string | null;
 };
 
 export type ImportResult = {

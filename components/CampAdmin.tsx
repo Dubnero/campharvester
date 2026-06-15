@@ -55,7 +55,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
   const [providers, setProviders] = useState<Provider[]>(initialProviders);
   const [dataSourceMessage, setDataSourceMessage] = useState("Loading Supabase data…");
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedCampId, setSelectedCampId] = useState(initialCamps[0]?.id ?? "");
+  const [selectedCampId, setSelectedCampId] = useState(initialCamps[0]?.camp_id ?? "");
   const [filters, setFilters] = useState<Filters>({
     search: "",
     county: "",
@@ -80,7 +80,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
         setProviders(remoteProviders.data.length > 0 ? remoteProviders.data : initialProviders);
         const nextCamps = remoteCamps.data.length > 0 ? remoteCamps.data : initialCamps;
         setCamps(nextCamps);
-        setSelectedCampId(nextCamps[0]?.id ?? "");
+        setSelectedCampId(nextCamps[0]?.camp_id ?? "");
         setDataSourceMessage("Showing Supabase data.");
       } else {
         const storedProviders = loadStoredProviders();
@@ -88,7 +88,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
         const storedCamps = loadStoredCamps();
         if (storedCamps) {
           setCamps(storedCamps);
-          setSelectedCampId(storedCamps[0]?.id ?? "");
+          setSelectedCampId(storedCamps[0]?.camp_id ?? "");
         }
         setDataSourceMessage(`Showing local fallback data${remoteProviders.error || remoteCamps.error ? ` (${remoteProviders.error ?? remoteCamps.error})` : ""}.`);
       }
@@ -102,7 +102,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
   const providerLookup = useMemo(() => providersById(providers), [providers]);
   const stats = useMemo(() => getDashboardStats(camps, providers), [camps, providers]);
   const filteredCamps = useMemo(() => filterCamps(camps, providers, filters), [camps, providers, filters]);
-  const selectedCamp = camps.find((camp) => camp.id === selectedCampId) ?? camps[0] ?? createBlankCamp(providers[0]?.provider_id ?? "");
+  const selectedCamp = camps.find((camp) => camp.camp_id === selectedCampId) ?? camps[0] ?? createBlankCamp(providers[0]?.provider_id ?? "");
   const selectedProvider = providerLookup[selectedCamp.provider_id];
   const counties = useMemo(() => getUniqueValues(camps, "county"), [camps]);
   const activityTypes = useMemo(() => getUniqueValues(camps, "activity_type"), [camps]);
@@ -113,7 +113,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
 
   function updateCamp(field: keyof Camp, value: string | number | boolean) {
     setCamps((currentCamps) =>
-      currentCamps.map((camp) => (camp.id === selectedCamp.id ? { ...camp, [field]: value } : camp)),
+      currentCamps.map((camp) => (camp.camp_id === selectedCamp.camp_id ? { ...camp, [field]: value } : camp)),
     );
   }
 
@@ -123,7 +123,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
 
     clearStoredCamps();
     setCamps(initialCamps);
-    setSelectedCampId(initialCamps[0]?.id ?? "");
+    setSelectedCampId(initialCamps[0]?.camp_id ?? "");
     setDataSourceMessage("Showing bundled mock data after clearing local fallback camps.");
     setFilters({ search: "", county: "", activityType: "", holidayType: "", status: "" });
     setImportErrors([]);
@@ -133,7 +133,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
   function addCamp() {
     const blankCamp = createBlankCamp(providers[0]?.provider_id ?? "");
     setCamps((currentCamps) => [blankCamp, ...currentCamps]);
-    setSelectedCampId(blankCamp.id);
+    setSelectedCampId(blankCamp.camp_id);
     setFormErrors([]);
   }
 
@@ -152,7 +152,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
       setImportErrors(result.errors);
       if (result.errors.length === 0) {
         setCamps(result.camps);
-        setSelectedCampId(result.camps[0]?.id ?? "");
+        setSelectedCampId(result.camps[0]?.camp_id ?? "");
       }
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -389,10 +389,10 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
 
                 return (
                   <tr
-                    key={camp.id}
-                    className={camp.id === selectedCamp.id ? "selected-row" : ""}
+                    key={camp.camp_id}
+                    className={camp.camp_id === selectedCamp.camp_id ? "selected-row" : ""}
                     onClick={() => {
-                      setSelectedCampId(camp.id);
+                      setSelectedCampId(camp.camp_id);
                       setFormErrors([]);
                     }}
                   >

@@ -129,7 +129,7 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
         {sortedCamps.length > 0 ? (
           <div className="camp-card-grid">
             {sortedCamps.map((camp) => (
-              <article className="camp-card" key={camp.id}>
+              <article className="camp-card" key={camp.camp_id}>
                 <div className="camp-card-main">
                   <div className="card-badges"><span className="badge success">{camp.activity_type}</span><span className="badge muted">{camp.holiday_type}</span></div>
                   <h3>{camp.camp_name}</h3>

@@ -49,14 +49,14 @@ npm run build
 CampHarvester expects an existing Supabase project with public read policies already configured for these tables:
 
 - `providers`, keyed by `provider_id`.
-- `camps`, keyed by `id`.
+- `camps`, keyed by `camp_id`.
 
 The app uses `@supabase/supabase-js` through a shared client in `lib/supabase.ts`. Data access is centralized in `lib/dataRepository.ts`:
 
 - `getProviders()` reads provider rows from Supabase.
 - `upsertProviders()` upserts provider import rows by `provider_id`.
 - `getCamps()` reads camp rows from Supabase.
-- `upsertCamps()` upserts camp import rows by `id`.
+- `upsertCamps()` upserts camp import rows by `camp_id`.
 
 ### Environment variables
 
@@ -108,7 +108,7 @@ Camps store camp-specific listing details and reference providers by `provider_i
 The importer expects camp rows with a header row. Required camp columns are:
 
 ```text
-camp_id, provider_id, camp_name, county, town, address, eircode, activity_type, holiday_type, age_min, age_max, start_date, end_date, start_time, end_time, half_day_or_full_day, price, booking_url, status, verified, featured, source_url, last_checked
+camp_id, provider_id, camp_name, county, town, address, eircode, activity_type, holiday_type, age_min, age_max, start_date, end_date, start_time, end_time, half_day_or_full_day, price, booking_url, status, verified, featured, source_url, last_checked, created_at
 ```
 
 Optional camp columns are preserved when present:
