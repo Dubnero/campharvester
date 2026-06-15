@@ -1,7 +1,7 @@
 import { Camp, ImportResult, Provider, campStatuses, dayLengths, holidayTypes } from "./types";
 
 export const campFields: (keyof Camp)[] = [
-  "id",
+  "camp_id",
   "provider_id",
   "camp_name",
   "county",
@@ -27,7 +27,7 @@ export const campFields: (keyof Camp)[] = [
 ];
 
 export const requiredCampFields: (keyof Camp)[] = [
-  "id",
+  "camp_id",
   "provider_id",
   "camp_name",
   "county",
@@ -43,7 +43,7 @@ export const requiredCampFields: (keyof Camp)[] = [
 
 export function createBlankCamp(defaultProviderId = ""): Camp {
   return {
-    id: `camp-${Date.now()}`,
+    camp_id: `camp-${Date.now()}`,
     provider_id: defaultProviderId,
     camp_name: "",
     county: "",
@@ -202,7 +202,7 @@ function escapeCsvValue(value: unknown) {
 }
 
 export function campsToCsv(camps: Camp[]) {
-  const rows = [campFields.map((field) => (field === "id" ? "camp_id" : field)).join(",")];
+  const rows = [campFields.join(",")];
   camps.forEach((camp) => {
     rows.push(campFields.map((field) => escapeCsvValue(camp[field])).join(","));
   });
@@ -259,9 +259,9 @@ export function csvToCamps(text: string, providers: Provider[]): ImportResult {
   }
 
   const headers = rows[0].map((header) => header.trim());
-  const hasCampId = headers.includes("camp_id") || headers.includes("id");
+  const hasCampId = headers.includes("camp_id");
   const missingRequired = requiredCampFields.filter((field) => {
-    if (field === "id") return !hasCampId;
+    if (field === "camp_id") return !hasCampId;
     return !headers.includes(field);
   });
 
@@ -277,7 +277,7 @@ export function csvToCamps(text: string, providers: Provider[]): ImportResult {
     const camp = createBlankCamp(providers[0]?.provider_id ?? "");
 
     campFields.forEach((field) => {
-      const rawValue = field === "id" ? (values.camp_id ?? values.id ?? camp[field]) : (values[field] ?? camp[field]);
+      const rawValue = values[field] ?? camp[field];
       if (field === "age_min" || field === "age_max") {
         (camp[field] as number) = Number(rawValue);
       } else if (field === "verified" || field === "featured") {

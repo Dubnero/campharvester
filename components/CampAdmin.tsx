@@ -15,6 +15,8 @@ import {
   validateCamp,
 } from "@/lib/campUtils";
 import { clearStoredCamps, loadStoredCamps } from "@/lib/campStorage";
+import { getCamps, getProviders } from "@/lib/dataRepository";
+import { migrateLocalStorageToSupabaseIfEmpty } from "@/lib/localStorageMigration";
 import { loadStoredProviders } from "@/lib/providerStorage";
 import { Camp, Provider, campStatuses, dayLengths, holidayTypes } from "@/lib/types";
 
@@ -51,8 +53,9 @@ function badgeClass(status: Camp["status"]) {
 export function CampAdmin({ initialCamps, initialProviders }: Props) {
   const [camps, setCamps] = useState<Camp[]>(initialCamps);
   const [providers, setProviders] = useState<Provider[]>(initialProviders);
-  const [usingImportedCamps, setUsingImportedCamps] = useState(false);
-  const [selectedCampId, setSelectedCampId] = useState(initialCamps[0]?.id ?? "");
+  const [dataSourceMessage, setDataSourceMessage] = useState("Loading Supabase data…");
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedCampId, setSelectedCampId] = useState(initialCamps[0]?.camp_id ?? "");
   const [filters, setFilters] = useState<Filters>({
     search: "",
     county: "",
@@ -65,21 +68,41 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const storedProviders = loadStoredProviders();
-    if (storedProviders) setProviders(storedProviders);
+    let active = true;
 
-    const storedCamps = loadStoredCamps();
-    if (!storedCamps) return;
+    async function loadDashboardData() {
+      setIsLoading(true);
+      await migrateLocalStorageToSupabaseIfEmpty();
+      const [remoteProviders, remoteCamps] = await Promise.all([getProviders(), getCamps()]);
+      if (!active) return;
 
-    setCamps(storedCamps);
-    setSelectedCampId(storedCamps[0]?.id ?? "");
-    setUsingImportedCamps(true);
-  }, []);
+      if (!remoteProviders.error && !remoteCamps.error && (remoteProviders.data.length > 0 || remoteCamps.data.length > 0)) {
+        setProviders(remoteProviders.data.length > 0 ? remoteProviders.data : initialProviders);
+        const nextCamps = remoteCamps.data.length > 0 ? remoteCamps.data : initialCamps;
+        setCamps(nextCamps);
+        setSelectedCampId(nextCamps[0]?.camp_id ?? "");
+        setDataSourceMessage("Showing Supabase data.");
+      } else {
+        const storedProviders = loadStoredProviders();
+        if (storedProviders) setProviders(storedProviders);
+        const storedCamps = loadStoredCamps();
+        if (storedCamps) {
+          setCamps(storedCamps);
+          setSelectedCampId(storedCamps[0]?.camp_id ?? "");
+        }
+        setDataSourceMessage(`Showing local fallback data${remoteProviders.error || remoteCamps.error ? ` (${remoteProviders.error ?? remoteCamps.error})` : ""}.`);
+      }
+      setIsLoading(false);
+    }
+
+    loadDashboardData();
+    return () => { active = false; };
+  }, [initialCamps, initialProviders]);
 
   const providerLookup = useMemo(() => providersById(providers), [providers]);
   const stats = useMemo(() => getDashboardStats(camps, providers), [camps, providers]);
   const filteredCamps = useMemo(() => filterCamps(camps, providers, filters), [camps, providers, filters]);
-  const selectedCamp = camps.find((camp) => camp.id === selectedCampId) ?? camps[0] ?? createBlankCamp(providers[0]?.provider_id ?? "");
+  const selectedCamp = camps.find((camp) => camp.camp_id === selectedCampId) ?? camps[0] ?? createBlankCamp(providers[0]?.provider_id ?? "");
   const selectedProvider = providerLookup[selectedCamp.provider_id];
   const counties = useMemo(() => getUniqueValues(camps, "county"), [camps]);
   const activityTypes = useMemo(() => getUniqueValues(camps, "activity_type"), [camps]);
@@ -90,19 +113,18 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
 
   function updateCamp(field: keyof Camp, value: string | number | boolean) {
     setCamps((currentCamps) =>
-      currentCamps.map((camp) => (camp.id === selectedCamp.id ? { ...camp, [field]: value } : camp)),
+      currentCamps.map((camp) => (camp.camp_id === selectedCamp.camp_id ? { ...camp, [field]: value } : camp)),
     );
   }
 
   function handleClearImportedCamps() {
-    if (!usingImportedCamps) return;
     const confirmed = window.confirm("Clear imported camps and revert to mock camp data?");
     if (!confirmed) return;
 
     clearStoredCamps();
     setCamps(initialCamps);
-    setSelectedCampId(initialCamps[0]?.id ?? "");
-    setUsingImportedCamps(false);
+    setSelectedCampId(initialCamps[0]?.camp_id ?? "");
+    setDataSourceMessage("Showing bundled mock data after clearing local fallback camps.");
     setFilters({ search: "", county: "", activityType: "", holidayType: "", status: "" });
     setImportErrors([]);
     setFormErrors([]);
@@ -111,7 +133,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
   function addCamp() {
     const blankCamp = createBlankCamp(providers[0]?.provider_id ?? "");
     setCamps((currentCamps) => [blankCamp, ...currentCamps]);
-    setSelectedCampId(blankCamp.id);
+    setSelectedCampId(blankCamp.camp_id);
     setFormErrors([]);
   }
 
@@ -130,7 +152,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
       setImportErrors(result.errors);
       if (result.errors.length === 0) {
         setCamps(result.camps);
-        setSelectedCampId(result.camps[0]?.id ?? "");
+        setSelectedCampId(result.camps[0]?.camp_id ?? "");
       }
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -239,7 +261,7 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
     <main className="app-shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">Internal admin · local data</p>
+          <p className="eyebrow">Internal admin · Supabase primary data</p>
           <h1>CampHarvester</h1>
           <p>
             Collect, review and manage Irish kids&apos; camp listings for Wicklow and Dublin before the public
@@ -267,15 +289,11 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
 
       <section className="panel data-source-banner" aria-live="polite">
         <p>
-          {usingImportedCamps
-            ? `Showing imported camp data (${camps.length} camps loaded from local storage).`
-            : "Showing mock camp data."}
+          {isLoading ? "Loading providers and camps from Supabase…" : dataSourceMessage}
         </p>
-        {usingImportedCamps ? (
-          <button type="button" className="secondary" onClick={handleClearImportedCamps}>
-            Clear imported camps
-          </button>
-        ) : null}
+        <button type="button" className="secondary" onClick={handleClearImportedCamps}>
+          Clear local fallback camps
+        </button>
       </section>
 
       <section className="stats-grid" aria-label="Dashboard metrics">
@@ -371,10 +389,10 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
 
                 return (
                   <tr
-                    key={camp.id}
-                    className={camp.id === selectedCamp.id ? "selected-row" : ""}
+                    key={camp.camp_id}
+                    className={camp.camp_id === selectedCamp.camp_id ? "selected-row" : ""}
                     onClick={() => {
-                      setSelectedCampId(camp.id);
+                      setSelectedCampId(camp.camp_id);
                       setFormErrors([]);
                     }}
                   >

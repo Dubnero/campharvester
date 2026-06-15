@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { loadStoredCamps } from "@/lib/campStorage";
 import { loadStoredProviders } from "@/lib/providerStorage";
+import { getCamps, getProviders } from "@/lib/dataRepository";
 import {
   buildPublicCamps,
   filterPublicCamps,
@@ -28,10 +29,31 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
   const [providers, setProviders] = useState(initialProviders);
   const [filters, setFilters] = useState(initialFilters);
   const [sort, setSort] = useState<PublicSort>("soonest");
+  const [isLoading, setIsLoading] = useState(true);
+  const [dataSource, setDataSource] = useState("Loading directory data…");
 
   useEffect(() => {
-    setProviders(loadStoredProviders() ?? initialProviders);
-    setCamps(loadStoredCamps() ?? initialCamps);
+    let active = true;
+
+    async function loadDirectoryData() {
+      setIsLoading(true);
+      const [remoteProviders, remoteCamps] = await Promise.all([getProviders(), getCamps()]);
+      if (!active) return;
+
+      if (!remoteProviders.error && !remoteCamps.error && (remoteProviders.data.length > 0 || remoteCamps.data.length > 0)) {
+        setProviders(remoteProviders.data.length > 0 ? remoteProviders.data : initialProviders);
+        setCamps(remoteCamps.data.length > 0 ? remoteCamps.data : initialCamps);
+        setDataSource("Showing Supabase data.");
+      } else {
+        setProviders(loadStoredProviders() ?? initialProviders);
+        setCamps(loadStoredCamps() ?? initialCamps);
+        setDataSource(`Showing local fallback data${remoteProviders.error || remoteCamps.error ? ` (${remoteProviders.error ?? remoteCamps.error})` : ""}.`);
+      }
+      setIsLoading(false);
+    }
+
+    loadDirectoryData();
+    return () => { active = false; };
   }, [initialCamps, initialProviders]);
 
   const publicCamps = useMemo(() => buildPublicCamps(camps, providers), [camps, providers]);
@@ -73,6 +95,8 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
         <p>Search by camp, provider, town or county and compare activities, ages, dates and prices.</p>
       </section>
 
+      <section className="public-panel data-source-banner" aria-live="polite"><p>{isLoading ? "Loading camps from Supabase…" : dataSource}</p></section>
+
       <section className="public-panel" aria-label="Search and filters">
         <div className="public-filters">
           <label className="public-search">
@@ -105,7 +129,7 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
         {sortedCamps.length > 0 ? (
           <div className="camp-card-grid">
             {sortedCamps.map((camp) => (
-              <article className="camp-card" key={camp.id}>
+              <article className="camp-card" key={camp.camp_id}>
                 <div className="camp-card-main">
                   <div className="card-badges"><span className="badge success">{camp.activity_type}</span><span className="badge muted">{camp.holiday_type}</span></div>
                   <h3>{camp.camp_name}</h3>

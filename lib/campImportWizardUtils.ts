@@ -16,19 +16,12 @@ export type CampImportSummary = {
   errors: string[];
 };
 
-const campIdAliases = ["id", "camp_id"];
-
 function getRawValue(values: Record<string, string>, field: keyof Camp, fallback: Camp[keyof Camp]) {
-  if (field === "id") {
-    const alias = campIdAliases.find((header) => values[header] !== undefined);
-    return alias ? values[alias] : fallback;
-  }
-
   return values[field] ?? fallback;
 }
 
 export function getCampImportTemplateHeaders() {
-  return campFields.map((field) => (field === "id" ? "camp_id" : field));
+  return campFields;
 }
 
 export function validateDuplicateCampIds(rows: CampImportRow[]) {
@@ -36,7 +29,7 @@ export function validateDuplicateCampIds(rows: CampImportRow[]) {
   const errors: string[] = [];
 
   rows.forEach(({ rowNumber, camp }) => {
-    const campId = camp.id.trim();
+    const campId = camp.camp_id.trim();
     if (!campId) return;
 
     const firstRow = seen.get(campId);
@@ -68,12 +61,7 @@ export function buildCampImportSummary(csvText: string, providers: Provider[]): 
   }
 
   const headers = rows[0].map((header) => header.trim());
-  const hasCampId = campIdAliases.some((header) => headers.includes(header));
-  const requiredHeaders = requiredCampFields.map((field) => (field === "id" ? "camp_id" : field));
-  const missingRequired = requiredHeaders.filter((field) => {
-    if (field === "camp_id") return !hasCampId;
-    return !headers.includes(field);
-  });
+  const missingRequired = requiredCampFields.filter((field) => !headers.includes(field));
 
   if (missingRequired.length > 0) {
     return {

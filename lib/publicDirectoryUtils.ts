@@ -27,7 +27,7 @@ export function slugify(value: string) {
 
 export function campPublicSlug(camp: Camp) {
   const base = slugify(`${camp.camp_name} ${camp.town}`) || slugify(camp.camp_name) || "camp";
-  return `${base}-${camp.id}`;
+  return `${base}-${camp.camp_id}`;
 }
 
 export function buildPublicCamps(camps: Camp[], providers: Provider[]): PublicCamp[] {
@@ -36,7 +36,7 @@ export function buildPublicCamps(camps: Camp[], providers: Provider[]): PublicCa
 }
 
 export function findPublicCamp(camps: PublicCamp[], campIdOrSlug: string) {
-  return camps.find((camp) => camp.id === campIdOrSlug || camp.publicSlug === campIdOrSlug);
+  return camps.find((camp) => camp.camp_id === campIdOrSlug || camp.publicSlug === campIdOrSlug);
 }
 
 export function getUniquePublicValues(camps: PublicCamp[], key: keyof Pick<Camp, "county" | "town" | "activity_type" | "holiday_type">) {
