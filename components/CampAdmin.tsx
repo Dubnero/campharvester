@@ -272,6 +272,9 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
           <Link className="button-link public-directory-link" href="/camps">
             View Public Directory
           </Link>
+          <Link className="button-link" href="/discovery">
+            Discovery Assistant
+          </Link>
           <Link className="button-link" href="/providers">
             Provider Import
           </Link>
