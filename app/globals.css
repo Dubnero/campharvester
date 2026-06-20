@@ -983,3 +983,19 @@ button:disabled:hover {
     grid-template-columns: 1fr;
   }
 }
+
+.debug-fields {
+  display: grid;
+  gap: 0.35rem 0.75rem;
+  grid-template-columns: max-content 1fr;
+  margin: 0;
+}
+
+.debug-fields dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.debug-fields dd {
+  margin: 0;
+}
