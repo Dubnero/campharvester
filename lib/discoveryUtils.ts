@@ -154,25 +154,50 @@ function findCampTitle(lines: string[], index: number, providerName: string, tow
   return title ?? (town ? `${town} Summer Camp` : "Summer Camp");
 }
 
+function isSelectMarker(line: string) {
+  return /^select\b/i.test(line);
+}
+function isMarketingScheduleTitle(line: string) {
+  const dateRange = parseDateRange(line);
+  return Boolean(dateRange && dateRange.priority >= 4);
+}
+function previousMarketingTitleOwnsStructuredLine(lines: string[], index: number) {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (isSelectMarker(lines[cursor]) || parseDateRange(lines[cursor])?.priority === 1 || parseDateRange(lines[cursor])?.priority === 2) return false;
+    if (isMarketingScheduleTitle(lines[cursor])) return true;
+  }
+  return false;
+}
 function bricksScheduleRows(lines: string[]) {
   const rows: Array<{ index: number; dateRange: BricksDateRange; text: string }> = [];
   const seen = new Set<string>();
   for (let index = 0; index < lines.length; index += 1) {
     const dateRange = parseDateRange(lines[index]);
     if (!dateRange) continue;
-    const nearby: Array<{ line: string; offset: number; dateRange: BricksDateRange }> = [];
-    lines.slice(index, Math.min(lines.length, index + 4)).forEach((line, offset) => {
-      const nearbyDateRange = parseDateRange(line);
-      if (nearbyDateRange) nearby.push({ line, offset, dateRange: nearbyDateRange });
-    });
-    const best = nearby.reduce((winner, item) => item.dateRange.priority < winner.dateRange.priority ? item : winner, { line: lines[index], offset: 0, dateRange });
-    if (best.offset > 0 && dateRange.priority > best.dateRange.priority) continue;
-    const rowIndex = index + best.offset;
-    const contextText = lines.slice(Math.max(0, index - 1), Math.min(lines.length, rowIndex + 7)).join(" · ");
-    const key = `${best.dateRange.startDate}:${best.dateRange.endDate}:${contextText.replace(/€?\s*0\.00/g, "").slice(0, 160).toLowerCase()}`;
+    const isMarketingTitle = dateRange.priority >= 4;
+    if (!isMarketingTitle && previousMarketingTitleOwnsStructuredLine(lines, index)) continue;
+
+    let limit = Math.min(lines.length, index + 8);
+    for (let cursor = index + 1; cursor < limit; cursor += 1) {
+      if (isSelectMarker(lines[cursor]) || isMarketingScheduleTitle(lines[cursor])) {
+        limit = cursor;
+        break;
+      }
+    }
+
+    let best = { index, dateRange };
+    if (isMarketingTitle) {
+      for (let cursor = index + 1; cursor < limit; cursor += 1) {
+        const forwardDateRange = parseDateRange(lines[cursor]);
+        if (forwardDateRange && forwardDateRange.priority < best.dateRange.priority) best = { index: cursor, dateRange: forwardDateRange };
+      }
+    }
+
+    const contextText = lines.slice(index, Math.max(limit, best.index + 1)).join(" · ");
+    const key = `${best.dateRange.startDate}:${best.dateRange.endDate}:${lines[index].toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    rows.push({ index: rowIndex, dateRange: best.dateRange, text: contextText });
+    rows.push({ index: best.index, dateRange: best.dateRange, text: contextText });
   }
   return rows;
 }

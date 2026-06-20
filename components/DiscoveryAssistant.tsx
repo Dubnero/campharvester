@@ -69,8 +69,6 @@ export function DiscoveryAssistant() {
 
   async function applyExtraction(pages = pageAnalyses, manual = manualPages) {
     const extraction = mergeExtraction(pages, manual);
-    setProviders(extraction.providers);
-    setCamps(extraction.camps);
     setWarnings((current) => Array.from(new Set([...current, ...extraction.warnings])));
     await detectDuplicates(extraction.providers, extraction.camps);
   }
