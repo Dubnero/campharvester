@@ -21,7 +21,7 @@ const monthNumbers: Record<string, string> = { jan: "01", january: "01", feb: "0
 const southDublinTowns = ["Firhouse", "Cherrywood", "Mount Merrion", "Newtownpark", "Kilternan", "Saggart", "Rathfarnham", "Killiney", "Foxrock", "Sandyford", "Knocklyon", "Cabinteely", "Dundrum", "Stillorgan", "Blackrock", "Monkstown", "Dún Laoghaire", "Dun Laoghaire", "Dalkey", "Ballinteer", "Terenure", "Templeogue", "Tallaght", "Lucan", "Clondalkin"];
 const nonCampOffering = /\b(after[- ]?school(?:\s+clubs?)?|birthday\s+part(?:y|ies)|workshops?|holiday\s+clubs?)\b/i;
 
-type BricksDateRange = { label: string; startDate: string; endDate: string };
+type BricksDateRange = { label: string; startDate: string; endDate: string; priority: number };
 type TimeRange = { startTime: string; endTime: string; label: string };
 
 function cleanOrdinal(value: string) { return value.replace(/(st|nd|rd|th)$/i, ""); }
@@ -31,19 +31,21 @@ function isoDate(day: string, month: string, year: string) { return `${year}-${m
 function parseNumericDate(day: string, month: string, year: string) { return `${year.length === 2 ? `20${year}` : year}-${pad2(month)}-${pad2(day)}`; }
 function parseDateRange(text: string): BricksDateRange | null {
   const numericRange = text.match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](20\d{2}|\d{2})\s*(?:-|–|to)\s*(\d{1,2})[\/-](\d{1,2})[\/-](20\d{2}|\d{2})\b/i);
-  if (numericRange) return { label: numericRange[0], startDate: parseNumericDate(numericRange[1], numericRange[2], numericRange[3]), endDate: parseNumericDate(numericRange[4], numericRange[5], numericRange[6]) };
+  if (numericRange) return { label: numericRange[0], startDate: parseNumericDate(numericRange[1], numericRange[2], numericRange[3]), endDate: parseNumericDate(numericRange[4], numericRange[5], numericRange[6]), priority: 1 };
+  const isoRange = text.match(/\b(20\d{2})-(\d{2})-(\d{2})\s*(?:-|–|to)\s*(20\d{2})-(\d{2})-(\d{2})\b/i);
+  if (isoRange) return { label: isoRange[0], startDate: `${isoRange[1]}-${isoRange[2]}-${isoRange[3]}`, endDate: `${isoRange[4]}-${isoRange[5]}-${isoRange[6]}`, priority: 2 };
   const year = inferYear(text);
   const splitMonth = text.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*(?:-|–|to)\s*(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s+(20\d{2}))?/i);
-  if (splitMonth) return { label: splitMonth[0], startDate: isoDate(splitMonth[1], splitMonth[2], splitMonth[5] || year), endDate: isoDate(splitMonth[3], splitMonth[4], splitMonth[5] || year) };
+  if (splitMonth) return { label: splitMonth[0], startDate: isoDate(splitMonth[1], splitMonth[2], splitMonth[5] || year), endDate: isoDate(splitMonth[3], splitMonth[4], splitMonth[5] || year), priority: 4 };
   const dayFirst = text.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:-|–|to)\s*(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s+(20\d{2}))?/i);
-  if (dayFirst) return { label: dayFirst[0], startDate: isoDate(dayFirst[1], dayFirst[3], dayFirst[4] || year), endDate: isoDate(dayFirst[2], dayFirst[3], dayFirst[4] || year) };
+  if (dayFirst) return { label: dayFirst[0], startDate: isoDate(dayFirst[1], dayFirst[3], dayFirst[4] || year), endDate: isoDate(dayFirst[2], dayFirst[3], dayFirst[4] || year), priority: 4 };
   const monthFirst = text.match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,\s*(20\d{2}))?\s*(?:-|–|to)\s*(?:(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+)?(\d{1,2})(?:st|nd|rd|th)?(?:,\s*(20\d{2}))?(?!\s*(?:am|pm))/i);
   if (monthFirst) {
     const startMonth = monthFirst[1];
     const endMonth = monthFirst[4] || startMonth;
     const startYear = monthFirst[3] || year;
     const endYear = monthFirst[6] || startYear;
-    return { label: monthFirst[0], startDate: isoDate(monthFirst[2], startMonth, startYear), endDate: isoDate(monthFirst[5], endMonth, endYear) };
+    return { label: monthFirst[0], startDate: isoDate(monthFirst[2], startMonth, startYear), endDate: isoDate(monthFirst[5], endMonth, endYear), priority: 4 };
   }
   return null;
 }
@@ -69,7 +71,9 @@ function parseAgeRange(text: string) {
 }
 function inferTown(text: string) {
   const lower = text.toLowerCase();
-  if (/holy trinity church/i.test(text) && /killiney/i.test(text)) return "Killiney";
+  if (/rathfarn(?:ham|ahm|am)\s+etns/i.test(text)) return "Rathfarnham";
+  if (/\brathfarn(?:ham|ahm|am)\b/i.test(text)) return "Rathfarnham";
+  if (/holy trinity (?:church|centre)|carry centre/i.test(text) && /killiney|south county dublin|dublin|bricks\s*4\s*kidz|bricks4kidz/i.test(text)) return "Killiney";
   return southDublinTowns.find((town) => lower.includes(town.toLowerCase())) ?? "";
 }
 function inferCounty(text: string, fallback: string) {
@@ -92,14 +96,18 @@ function nearestAgeRange(lines: string[], index: number, radius = candidateAgeWi
 }
 
 function extractLocationText(text: string, dateRange: BricksDateRange) {
-  const withoutDate = text.replace(dateRange.label, " ").replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/i, " ").replace(/\b(?:suitable\s+for\s+)?ages?\s*:?\s*\d{1,2}\s*(?:-|–|to)\s*\d{1,2}(?:\s*(?:years?|yrs?))?\b|\b\d{1,2}\s*(?:-|–|to)\s*\d{1,2}\s*(?:years?|yrs?)\b/i, " ").replace(/(?:schedule\s+cost|term\s+(?:cost|price)|price)\s*:?\s*€?\s*\d+(?:\.\d{2})?|€\s*\d+(?:\.\d{2})?/i, " ").replace(/€?\s*0\.00\b/i, " ").trim();
+  const withoutDate = text.replace(dateRange.label, " ").replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/i, " ").replace(/\b(?:suitable\s+for\s+)?ages?\s*:?\s*\d{1,2}\s*(?:-|–|to)\s*\d{1,2}(?:\s*(?:years?|yrs?))?\b|\b\d{1,2}\s*(?:-|–|to)\s*\d{1,2}\s*(?:years?|yrs?)\b/i, " ").replace(/(?:schedule\s+cost|term\s+(?:cost|price)|price|cost)\s*:?\s*€?\s*\d+(?:\.\d{2})?|€\s*\d+(?:\.\d{2})?/i, " ").replace(/€?\s*0\.00\b/i, " ").trim();
   return withoutDate.replace(/\s{2,}/g, " ").replace(/^[·|,\s-]+|[·|,\s-]+$/g, "");
 }
 function extractPrice(text: string) {
-  const match = text.match(/(?:schedule\s+cost|term\s+(?:cost|price)|price)\s*:?\s*(€\s*\d+(?:\.\d{2})?|\d+(?:\.\d{2})?)|€\s*\d+(?:\.\d{2})?/i);
-  const value = match?.[1] ?? match?.[0] ?? "";
-  if (!value || /^€?\s*0(?:\.00)?$/i.test(value.trim())) return "";
-  return value.startsWith("€") ? value.replace(/€\s*/, "€") : `€${value}`;
+  const matches = Array.from(text.matchAll(/(?:schedule\s+cost|term\s+cost|term\s+price|price|cost)\s*:?\s*(€\s*\d+(?:\.\d{2})?|\d+(?:\.\d{2})?)|€\s*\d+(?:\.\d{2})?/gi));
+  const ordered = [...matches].sort((a, b) => (/schedule\s+cost/i.test(b[0]) ? 1 : 0) - (/schedule\s+cost/i.test(a[0]) ? 1 : 0));
+  for (const match of ordered) {
+    const value = (match[1] ?? match[0]).replace(/^(?:schedule\s+cost|term\s+cost|term\s+price|price|cost)\s*:?\s*/i, "").trim();
+    if (!value || /^€?\s*0(?:\.00)?$/i.test(value)) continue;
+    return value.startsWith("€") ? value.replace(/€\s*/, "€") : `€${value}`;
+  }
+  return "";
 }
 function nearestPrice(lines: string[], index: number) {
   const ownLine = extractPrice(lines[index]);
@@ -145,18 +153,64 @@ function findCampTitle(lines: string[], index: number, providerName: string, tow
   const title = lines.slice(Math.max(0, index - 6), index + 1).reverse().find((line) => /\bcamps?\b/i.test(line) && !nonCampOffering.test(line) && !navigationReject.test(line) && line.toLowerCase() !== providerName.toLowerCase());
   return title ?? (town ? `${town} Summer Camp` : "Summer Camp");
 }
+
+function isSelectMarker(line: string) {
+  return /^select\b/i.test(line);
+}
+function isMarketingScheduleTitle(line: string) {
+  const dateRange = parseDateRange(line);
+  return Boolean(dateRange && dateRange.priority >= 4);
+}
+function marketingTitleHasVenue(line: string, dateRange: BricksDateRange) {
+  return Boolean(inferTown(line) || extractLocationText(line, dateRange));
+}
+function bricksScheduleRows(lines: string[]) {
+  const rows: Array<{ index: number; dateRange: BricksDateRange; text: string }> = [];
+  const usedStructuredRows = new Set<number>();
+  const seenTitles = new Set<string>();
+  for (let index = 0; index < lines.length; index += 1) {
+    const titleDateRange = parseDateRange(lines[index]);
+    if (!titleDateRange || titleDateRange.priority < 4 || !marketingTitleHasVenue(lines[index], titleDateRange)) continue;
+
+    let structuredIndex = -1;
+    let structuredDateRange: BricksDateRange | null = null;
+    let limit = Math.min(lines.length, index + 10);
+    for (let cursor = index + 1; cursor < limit; cursor += 1) {
+      if (isSelectMarker(lines[cursor]) || isMarketingScheduleTitle(lines[cursor])) {
+        limit = cursor;
+        break;
+      }
+      const forwardDateRange = parseDateRange(lines[cursor]);
+      if (forwardDateRange && forwardDateRange.priority < 4) {
+        if (!usedStructuredRows.has(cursor)) {
+          structuredIndex = cursor;
+          structuredDateRange = forwardDateRange;
+        }
+        limit = cursor + 1;
+        break;
+      }
+    }
+    if (structuredIndex === -1 || !structuredDateRange) continue;
+
+    const key = `${index}:${lines[index].toLowerCase()}`;
+    if (seenTitles.has(key)) continue;
+    seenTitles.add(key);
+    usedStructuredRows.add(structuredIndex);
+    rows.push({ index: structuredIndex, dateRange: structuredDateRange, text: lines.slice(index, limit).join(" · ") });
+  }
+  return rows;
+}
 function extractBricksBookingCamps(rawText: string, input: DiscoveryInput, providerName: string, providerId: string, fallbackCounty: string, sourceMethod: SourceMethod) {
   const lines = rawText.replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
   const camps: DiscoveryCamp[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const rowHasDate = parseDateRange(lines[index]);
-    if (!rowHasDate) continue;
-    const context = lines.slice(Math.max(0, index - 3), index + 1).join(" · ");
-    const dateRange = rowHasDate;
-    const timeRange = parseTimeRange(lines[index]);
+  for (const row of bricksScheduleRows(lines)) {
+    const index = row.index;
+    const context = row.text;
+    const dateRange = row.dateRange;
+    const timeRange = parseTimeRange(context);
     const ageRange = nearestAgeRange(lines, index);
     if (!dateRange || !timeRange.startTime || !ageRange.ageMin) continue;
-    const locationText = extractLocationText(lines[index], dateRange) || extractLocationText(context, dateRange);
+    const locationText = extractLocationText(context, dateRange);
     const town = inferTown(`${locationText} ${context}`);
     const title = findCampTitle(lines, index, providerName, town);
     if (!isCampOffering(`${title} ${context}`)) continue;
@@ -176,14 +230,14 @@ function uniqueDebugMatches(matches: ExtractionDebugMatch[]) { const seen = new 
 function buildBricksDebugCandidates(rawText: string, input: DiscoveryInput, providerName: string, fallbackCounty: string, sourceMethod: SourceMethod) {
   const lines = rawText.replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
   const rows: ExtractionDebugCandidate[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const dateRange = parseDateRange(lines[index]);
-    if (!dateRange) continue;
-    const context = lines.slice(Math.max(0, index - 3), index + 1).join(" · ");
-    const candidateSlice = lines[index];
-    const timeRange = parseTimeRange(lines[index]);
+  for (const row of bricksScheduleRows(lines)) {
+    const index = row.index;
+    const dateRange = row.dateRange;
+    const context = row.text;
+    const candidateSlice = row.text;
+    const timeRange = parseTimeRange(context);
     const ageRange = nearestAgeRange(lines, index);
-    const locationText = extractLocationText(lines[index], dateRange) || extractLocationText(context, dateRange);
+    const locationText = extractLocationText(context, dateRange);
     const town = inferTown(`${locationText} ${context}`);
     const title = findCampTitle(lines, index, providerName, town);
     const county = inferCounty(`${locationText} ${input.sourceUrl} ${input.county ?? ""} ${input.notes ?? ""}`, fallbackCounty);
