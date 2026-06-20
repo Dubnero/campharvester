@@ -18,7 +18,8 @@ const eircodeRegex = /\b(?:[AC-FHKNPRTV-Y]\d{2}|D6W)\s?[0-9AC-FHKNPRTV-Y]{4}\b/i
 const candidateAgeWindow = 8;
 
 const monthNumbers: Record<string, string> = { jan: "01", january: "01", feb: "02", february: "02", mar: "03", march: "03", apr: "04", april: "04", may: "05", jun: "06", june: "06", jul: "07", july: "07", aug: "08", august: "08", sep: "09", sept: "09", september: "09", oct: "10", october: "10", nov: "11", november: "11", dec: "12", december: "12" };
-const southDublinTowns = ["Knocklyon", "Cabinteely", "Dundrum", "Rathfarnham", "Stillorgan", "Sandyford", "Blackrock", "Monkstown", "Dún Laoghaire", "Dun Laoghaire", "Dalkey", "Killiney", "Foxrock", "Ballinteer", "Terenure", "Templeogue", "Tallaght", "Lucan", "Clondalkin"];
+const southDublinTowns = ["Firhouse", "Cherrywood", "Mount Merrion", "Newtownpark", "Kilternan", "Saggart", "Rathfarnham", "Killiney", "Foxrock", "Sandyford", "Knocklyon", "Cabinteely", "Dundrum", "Stillorgan", "Blackrock", "Monkstown", "Dún Laoghaire", "Dun Laoghaire", "Dalkey", "Ballinteer", "Terenure", "Templeogue", "Tallaght", "Lucan", "Clondalkin"];
+const nonCampOffering = /\b(after[- ]?school(?:\s+clubs?)?|birthday\s+part(?:y|ies)|workshops?|holiday\s+clubs?)\b/i;
 
 type BricksDateRange = { label: string; startDate: string; endDate: string };
 type TimeRange = { startTime: string; endTime: string; label: string };
@@ -27,7 +28,10 @@ function cleanOrdinal(value: string) { return value.replace(/(st|nd|rd|th)$/i, "
 function pad2(value: string | number) { return String(value).padStart(2, "0"); }
 function inferYear(text: string) { return text.match(/\b20\d{2}\b/)?.[0] ?? today().slice(0, 4); }
 function isoDate(day: string, month: string, year: string) { return `${year}-${monthNumbers[month.toLowerCase()] ?? ""}-${pad2(cleanOrdinal(day))}`; }
+function parseNumericDate(day: string, month: string, year: string) { return `${year.length === 2 ? `20${year}` : year}-${pad2(month)}-${pad2(day)}`; }
 function parseDateRange(text: string): BricksDateRange | null {
+  const numericRange = text.match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](20\d{2}|\d{2})\s*(?:-|–|to)\s*(\d{1,2})[\/-](\d{1,2})[\/-](20\d{2}|\d{2})\b/i);
+  if (numericRange) return { label: numericRange[0], startDate: parseNumericDate(numericRange[1], numericRange[2], numericRange[3]), endDate: parseNumericDate(numericRange[4], numericRange[5], numericRange[6]) };
   const year = inferYear(text);
   const splitMonth = text.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*(?:-|–|to)\s*(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s+(20\d{2}))?/i);
   if (splitMonth) return { label: splitMonth[0], startDate: isoDate(splitMonth[1], splitMonth[2], splitMonth[5] || year), endDate: isoDate(splitMonth[3], splitMonth[4], splitMonth[5] || year) };
@@ -55,7 +59,9 @@ function to24Hour(hourValue: string, minuteValue: string | undefined, marker: st
 function parseTimeRange(text: string): TimeRange {
   const match = text.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
   if (!match || (!match[2] && !match[5] && !match[3] && !match[6])) return { startTime: "", endTime: "", label: "" };
-  return { label: match[0], startTime: to24Hour(match[1], match[2], match[3]), endTime: to24Hour(match[4], match[5], match[6]) };
+  const endMarker = match[6];
+  const startMarker = match[3] || (endMarker && Number(match[1]) <= Number(match[4]) ? endMarker : undefined);
+  return { label: match[0], startTime: to24Hour(match[1], match[2], startMarker), endTime: to24Hour(match[4], match[5], endMarker) };
 }
 function parseAgeRange(text: string) {
   const match = text.match(/\b(?:suitable\s+for\s+)?ages?\s*:?\s*(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})(?:\s*(?:years?|yrs?))?\b|\b(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s*(?:years?|yrs?)\b/i);
@@ -63,6 +69,7 @@ function parseAgeRange(text: string) {
 }
 function inferTown(text: string) {
   const lower = text.toLowerCase();
+  if (/holy trinity church/i.test(text) && /killiney/i.test(text)) return "Killiney";
   return southDublinTowns.find((town) => lower.includes(town.toLowerCase())) ?? "";
 }
 function inferCounty(text: string, fallback: string) {
@@ -85,12 +92,58 @@ function nearestAgeRange(lines: string[], index: number, radius = candidateAgeWi
 }
 
 function extractLocationText(text: string, dateRange: BricksDateRange) {
-  const withoutDate = text.replace(dateRange.label, " ").replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/i, " ").replace(/\b(?:suitable\s+for\s+)?ages?\s*:?\s*\d{1,2}\s*(?:-|–|to)\s*\d{1,2}(?:\s*(?:years?|yrs?))?\b|\b\d{1,2}\s*(?:-|–|to)\s*\d{1,2}\s*(?:years?|yrs?)\b/i, " ").replace(/€?\s*0\.00\b/i, " ").trim();
+  const withoutDate = text.replace(dateRange.label, " ").replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/i, " ").replace(/\b(?:suitable\s+for\s+)?ages?\s*:?\s*\d{1,2}\s*(?:-|–|to)\s*\d{1,2}(?:\s*(?:years?|yrs?))?\b|\b\d{1,2}\s*(?:-|–|to)\s*\d{1,2}\s*(?:years?|yrs?)\b/i, " ").replace(/(?:schedule\s+cost|term\s+(?:cost|price)|price)\s*:?\s*€?\s*\d+(?:\.\d{2})?|€\s*\d+(?:\.\d{2})?/i, " ").replace(/€?\s*0\.00\b/i, " ").trim();
   return withoutDate.replace(/\s{2,}/g, " ").replace(/^[·|,\s-]+|[·|,\s-]+$/g, "");
 }
-function findCampTitle(lines: string[], index: number, providerName: string) {
-  const title = lines.slice(Math.max(0, index - 5), index + 1).reverse().find((line) => /\b(camp|workshop|course|class|academy|club)\b/i.test(line) && !navigationReject.test(line) && line.toLowerCase() !== providerName.toLowerCase());
-  return title ?? "Bricks 4 Kidz Camp";
+function extractPrice(text: string) {
+  const match = text.match(/(?:schedule\s+cost|term\s+(?:cost|price)|price)\s*:?\s*(€\s*\d+(?:\.\d{2})?|\d+(?:\.\d{2})?)|€\s*\d+(?:\.\d{2})?/i);
+  const value = match?.[1] ?? match?.[0] ?? "";
+  if (!value || /^€?\s*0(?:\.00)?$/i.test(value.trim())) return "";
+  return value.startsWith("€") ? value.replace(/€\s*/, "€") : `€${value}`;
+}
+function nearestPrice(lines: string[], index: number) {
+  const ownLine = extractPrice(lines[index]);
+  if (ownLine) return ownLine;
+  for (let offset = 1; offset <= 6; offset += 1) {
+    const after = lines[index + offset];
+    if (after && parseDateRange(after)) break;
+    const priceAfter = after ? extractPrice(after) : "";
+    if (priceAfter) return priceAfter;
+  }
+  for (let offset = 1; offset <= 3; offset += 1) {
+    const before = lines[index - offset];
+    if (before && parseDateRange(before)) break;
+    const priceBefore = before ? extractPrice(before) : "";
+    if (priceBefore) return priceBefore;
+  }
+  return "";
+}
+function isCampOffering(text: string) {
+  const lower = text.toLowerCase();
+  if (/\b(after[- ]?school(?:\s+clubs?)?|birthday\s+part(?:y|ies)|workshops?)\b/i.test(text)) return false;
+  if (/holiday\s+club/i.test(text) && !/\bcamps?\b/.test(lower)) return false;
+  return /\bcamps?\b/.test(lower) || !nonCampOffering.test(text);
+}
+function inferHolidayFromDate(date: string, fallback?: string): HolidayType {
+  if (fallback) return fallback as HolidayType;
+  const month = Number(date.slice(5, 7));
+  if (month >= 6 && month <= 8) return "Summer";
+  if (month === 10) return "Halloween";
+  if (month === 12) return "Christmas";
+  if (month === 2) return "February Midterm";
+  if (month === 3 || month === 4) return "Easter";
+  return "Other";
+}
+function inferDayType(startTime: string, endTime: string) {
+  const minutes = (value: string) => { const [hour, minute] = value.split(":").map(Number); return hour * 60 + minute; };
+  if (!startTime || !endTime) return "Unknown";
+  const duration = minutes(endTime) - minutes(startTime);
+  if (duration <= 0) return "Unknown";
+  return duration < 300 ? "Half day" : "Full day";
+}
+function findCampTitle(lines: string[], index: number, providerName: string, town = "") {
+  const title = lines.slice(Math.max(0, index - 6), index + 1).reverse().find((line) => /\bcamps?\b/i.test(line) && !nonCampOffering.test(line) && !navigationReject.test(line) && line.toLowerCase() !== providerName.toLowerCase());
+  return title ?? (town ? `${town} Summer Camp` : "Summer Camp");
 }
 function extractBricksBookingCamps(rawText: string, input: DiscoveryInput, providerName: string, providerId: string, fallbackCounty: string, sourceMethod: SourceMethod) {
   const lines = rawText.replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
@@ -98,20 +151,22 @@ function extractBricksBookingCamps(rawText: string, input: DiscoveryInput, provi
   for (let index = 0; index < lines.length; index += 1) {
     const rowHasDate = parseDateRange(lines[index]);
     if (!rowHasDate) continue;
-    const context = lines.slice(Math.max(0, index - 1), Math.min(lines.length, index + 4)).join(" · ");
+    const context = lines.slice(Math.max(0, index - 3), index + 1).join(" · ");
     const dateRange = rowHasDate;
     const timeRange = parseTimeRange(lines[index]);
     const ageRange = nearestAgeRange(lines, index);
     if (!dateRange || !timeRange.startTime || !ageRange.ageMin) continue;
     const locationText = extractLocationText(lines[index], dateRange) || extractLocationText(context, dateRange);
-    const title = findCampTitle(lines, index, providerName);
-    const town = inferTown(locationText);
+    const town = inferTown(`${locationText} ${context}`);
+    const title = findCampTitle(lines, index, providerName, town);
+    if (!isCampOffering(`${title} ${context}`)) continue;
     const county = inferCounty(`${locationText} ${input.sourceUrl} ${input.county ?? ""} ${input.notes ?? ""}`, fallbackCounty);
-    const nameParts = [title, dateRange.label, town || locationText].filter(Boolean);
-    const campName = nameParts.join(" · ").slice(0, 140);
-    const fieldConfidence = { camp_name: 90, county: county ? 85 : 0, town: town ? 82 : 0, address: locationText ? 60 : 0, eircode: 0, activity_type: 95, holiday_type: 88, age: 95, start_date: 95, price: 0, booking_url: 80 };
+    if (!locationText) continue;
+    const price = nearestPrice(lines, index);
+    const campName = title.slice(0, 140);
+    const fieldConfidence = { camp_name: 90, county: county ? 85 : 0, town: town ? 82 : 0, address: locationText ? 60 : 0, eircode: 0, activity_type: 95, holiday_type: 88, age: 95, start_date: 95, price: price ? 100 : 0, booking_url: 80 };
     const confidence = confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 2, start_date: 2, price: 1, booking_url: 1, activity_type: 1 });
-    camps.push({ camp_id: slugify(`${providerId || "provider"}-${campName}`) || `bricks-booking-camp-${index + 1}`, provider_id: providerId, camp_name: campName, county, town, address: locationText, eircode: "", activity_type: "STEM", holiday_type: findHoliday(campName, input.holidayType?.trim()), age_min: ageRange.ageMin, age_max: ageRange.ageMax, start_date: dateRange.startDate, end_date: dateRange.endDate, start_time: timeRange.startTime, end_time: timeRange.endTime, half_day_or_full_day: "Unknown", price: "", booking_url: input.sourceUrl, status: "draft", verified: false, featured: false, source_url: input.sourceUrl, last_checked: today(), selected: confidence >= 60, needs_review: true, duplicateWarnings: [], confidence, fieldConfidence, extractionWarnings: [], source_method: sourceMethod });
+    camps.push({ camp_id: slugify(`${providerId || "provider"}-${campName}-${town}-${dateRange.startDate}`) || `bricks-booking-camp-${index + 1}`, provider_id: providerId, camp_name: campName, county, town, address: locationText, eircode: "", activity_type: "STEM", holiday_type: inferHolidayFromDate(dateRange.startDate, input.holidayType?.trim()), age_min: ageRange.ageMin, age_max: ageRange.ageMax, start_date: dateRange.startDate, end_date: dateRange.endDate, start_time: timeRange.startTime, end_time: timeRange.endTime, half_day_or_full_day: inferDayType(timeRange.startTime, timeRange.endTime), price, booking_url: input.sourceUrl, status: "draft", verified: false, featured: false, source_url: input.sourceUrl, last_checked: today(), selected: confidence >= 60, needs_review: true, duplicateWarnings: [], confidence, fieldConfidence, extractionWarnings: [], source_method: sourceMethod });
   }
   return camps;
 }
@@ -124,23 +179,25 @@ function buildBricksDebugCandidates(rawText: string, input: DiscoveryInput, prov
   for (let index = 0; index < lines.length; index += 1) {
     const dateRange = parseDateRange(lines[index]);
     if (!dateRange) continue;
-    const context = lines.slice(Math.max(0, index - 1), Math.min(lines.length, index + 4)).join(" · ");
-    const candidateSlice = candidateTextWindow(lines, index);
+    const context = lines.slice(Math.max(0, index - 3), index + 1).join(" · ");
+    const candidateSlice = lines[index];
     const timeRange = parseTimeRange(lines[index]);
     const ageRange = nearestAgeRange(lines, index);
     const locationText = extractLocationText(lines[index], dateRange) || extractLocationText(context, dateRange);
-    const title = findCampTitle(lines, index, providerName);
-    const town = inferTown(locationText);
+    const town = inferTown(`${locationText} ${context}`);
+    const title = findCampTitle(lines, index, providerName, town);
     const county = inferCounty(`${locationText} ${input.sourceUrl} ${input.county ?? ""} ${input.notes ?? ""}`, fallbackCounty);
-    const fieldConfidence = { camp_name: 90, county: county ? 85 : 0, town: town ? 82 : 0, address: locationText ? 60 : 0, eircode: 0, activity_type: 95, holiday_type: 88, age: ageRange.ageMin ? 95 : 0, start_date: dateRange.startDate ? 95 : 0, price: 0, booking_url: input.sourceUrl ? 80 : 0 };
-    rows.push({ extractedText: candidateSlice, parsedFields: { title, start_date: dateRange.startDate, end_date: dateRange.endDate, matched_time: timeRange.label, start_time: timeRange.startTime, end_time: timeRange.endTime, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: locationText, town, county, source_method: sourceMethod }, confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 2, start_date: 2, price: 1, booking_url: 1, activity_type: 1 }), validationFailures: [dateRange.startDate ? "" : "No valid start date", timeRange.startTime ? "" : "Missing time range", ageRange.ageMin ? "" : "Missing age range", locationText ? "" : "Missing location", title ? "" : "No camp title"].filter(Boolean) });
+    const notCamp = !isCampOffering(`${title} ${context}`);
+    const price = nearestPrice(lines, index);
+    const fieldConfidence = { camp_name: 90, county: county ? 85 : 0, town: town ? 82 : 0, address: locationText ? 60 : 0, eircode: 0, activity_type: 95, holiday_type: 88, age: ageRange.ageMin ? 95 : 0, start_date: dateRange.startDate ? 95 : 0, price: price ? 100 : 0, booking_url: input.sourceUrl ? 80 : 0 };
+    rows.push({ extractedText: candidateSlice, parsedFields: { title, holiday_type: inferHolidayFromDate(dateRange.startDate, input.holidayType?.trim()), day_type: inferDayType(timeRange.startTime, timeRange.endTime), start_date: dateRange.startDate, end_date: dateRange.endDate, matched_time: timeRange.label, start_time: timeRange.startTime, end_time: timeRange.endTime, price, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: locationText, town, county, source_method: sourceMethod, rejected_reason: [notCamp ? "Not a camp" : "", dateRange.startDate ? "" : "Missing date", locationText ? "" : "Missing location", ageRange.ageMin ? "" : "Missing age", timeRange.startTime ? "" : "Missing time"].filter(Boolean).join(", ") }, confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 2, start_date: 2, price: 1, booking_url: 1, activity_type: 1 }), validationFailures: [notCamp ? "Not a camp" : "", dateRange.startDate ? "" : "Missing date", locationText ? "" : "Missing location", ageRange.ageMin ? "" : "Missing age", timeRange.startTime ? "" : "Missing time"].filter(Boolean) });
   }
   return rows;
 }
 
 export function buildExtractionDebug(input: DiscoveryInput, rawText: string, sourceMethod: SourceMethod = "crawler"): ExtractionPipelineDebug {
   const text = rawText.replace(/\s+/g, " ").trim();
-  const providerName = input.providerName?.trim() || titleFromUrl(input.sourceUrl);
+  const providerName = input.providerName?.trim() || inferProviderName(input.sourceUrl, rawText);
   const county = inferCounty(`${text} ${input.sourceUrl} ${input.notes ?? ""}`, input.county?.trim() || findKnown(text, counties));
   const activity = classifyActivity(text, input.activityType?.trim());
   const genericRows: ExtractionDebugCandidate[] = extractCampCandidates(rawText, providerName).map(({ name, context }) => {
@@ -162,7 +219,7 @@ export function buildExtractionDebug(input: DiscoveryInput, rawText: string, sou
   const candidateRows = isBricks && bricksRows.length ? bricksRows : genericRows;
   const regexMatches = uniqueDebugMatches([...(providerName ? [{ type: "Provider" as const, value: providerName }] : []), ...allMatches(rawText, /\b(?:\d{1,2})(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*(?:-|–|to)\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s+20\d{2})?|\b\d{1,2}(?:st|nd|rd|th)?\s*(?:-|–|to)\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s+20\d{2})?|\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*20\d{2})?\s*(?:-|–|to)\s*(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+)?\d{1,2}(?:st|nd|rd|th)?(?:,\s*20\d{2})?/gi).map((value) => ({ type: "Date" as const, value })), ...allMatches(rawText, /\b\d{1,2}:\d{2}\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}:\d{2}\s*(?:am|pm)?\b|\b\d{1,2}\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}\s*(?:am|pm)\b/gi).map((value) => ({ type: "Time" as const, value })), ...allMatches(rawText, /\b(?:suitable\s+for\s+)?ages?\s*:?\s*\d{1,2}\s*(?:-|–|to)\s*\d{1,2}(?:\s*(?:years?|yrs?))?\b|\b\d{1,2}\s*(?:-|–|to)\s*\d{1,2}\s*(?:years?|yrs?)\b/gi).map((value) => ({ type: "Age" as const, value })), ...allMatches(rawText, /€\s?\d+(?:\.\d{2})?/g).map((value) => ({ type: "Price" as const, value })), ...southDublinTowns.filter((town) => rawText.toLowerCase().includes(town.toLowerCase())).map((value) => ({ type: "Town" as const, value })), ...candidateRows.map((row) => String(row.parsedFields.location ?? "")).filter(Boolean).map((value) => ({ type: "Location" as const, value }))]);
   const count = (type: ExtractionDebugMatch["type"]) => regexMatches.filter((match) => match.type === type).length;
-  return { sourceUrl: input.sourceUrl, sourceMethod, rawTextPreview: rawText.slice(0, 5000), stages: [{ label: "Provider detected", count: providerName ? 1 : 0, passed: Boolean(providerName) }, { label: "Dates detected", count: count("Date"), passed: count("Date") > 0 }, { label: "Time ranges detected", count: count("Time"), passed: count("Time") > 0 }, { label: "Age ranges detected", count: count("Age"), passed: count("Age") > 0 }, { label: "Locations detected", count: count("Location"), passed: count("Location") > 0 }, { label: "Candidate rows created", count: candidateRows.length, passed: candidateRows.length > 0 }, { label: "Camps created", count: records.camps.length, passed: records.camps.length > 0 }], regexMatches, candidateRows, validationFailures: [...candidateRows.flatMap((row) => row.validationFailures), ...Array.from({ length: Math.max(0, candidateRows.length - records.camps.length) }, () => "Duplicate camp")], finalCampObjects: records.camps };
+  return { sourceUrl: input.sourceUrl, sourceMethod, rawTextPreview: rawText.slice(0, 5000), stages: [{ label: "Provider detected", count: providerName ? 1 : 0, passed: Boolean(providerName) }, { label: "Dates detected", count: count("Date"), passed: count("Date") > 0 }, { label: "Time ranges detected", count: count("Time"), passed: count("Time") > 0 }, { label: "Age ranges detected", count: count("Age"), passed: count("Age") > 0 }, { label: "Locations detected", count: count("Location"), passed: count("Location") > 0 }, { label: "Candidate rows created", count: candidateRows.length, passed: candidateRows.length > 0 }, { label: "Camps created", count: records.camps.length, passed: records.camps.length > 0 }], regexMatches, candidateRows, validationFailures: [...candidateRows.flatMap((row) => row.validationFailures), ...Array.from({ length: Math.max(0, candidateRows.filter((row) => row.validationFailures.length === 0).length - records.camps.length) }, () => "Duplicate")], finalCampObjects: records.camps };
 }
 
 
@@ -172,6 +229,7 @@ function firstMatch(text: string, regex: RegExp) { return text.match(regex)?.[0]
 function firstUrl(text: string, regex: RegExp) { return text.match(regex)?.[0] ?? ""; }
 function findKnown(text: string, values: readonly string[]) { const lower = text.toLowerCase(); return values.find((value) => lower.includes(value.toLowerCase())) ?? ""; }
 function titleFromUrl(sourceUrl: string) { try { const url = new URL(sourceUrl); return url.hostname.replace(/^www\./, "").split(".")[0].replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); } catch { return ""; } }
+function inferProviderName(sourceUrl: string, text: string) { return /bricks\s*4\s*kidz|bricks4kidz|profile\.php|selected_schedule|ie1/i.test(`${sourceUrl} ${text}`) ? "Bricks4Kidz" : titleFromUrl(sourceUrl); }
 function websiteFromUrl(sourceUrl: string) { try { const url = new URL(sourceUrl); return `${url.protocol}//${url.host}`; } catch { return sourceUrl; } }
 function validEmail(text: string) { return firstMatch(text, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); }
 function validPhone(text: string) { return firstMatch(text, /(?:\+353|0)\s?(?:1|2[1-9]|4[0-9]|5[0-9]|6[0-9]|7[14]|8[356789]|9[0-9])(?:[\s-]?\d){6,8}\b/); }
@@ -198,7 +256,7 @@ function extractCampCandidates(rawText: string, providerName: string) {
     const line = lines[index];
     const context = lines.slice(Math.max(0, index - 2), index + 5).join(" · ");
     if (navigationReject.test(line) || /\bcamp dates?\b/i.test(line) || line.toLowerCase() === providerName.toLowerCase()) continue;
-    const hasCampName = /\b(camp|academy|workshop|course|club)\b/i.test(line);
+    const hasCampName = /\b(camp|academy|course|club)\b/i.test(line) && isCampOffering(`${line} ${context}`);
     const hasStrongContext = campSignal.test(context);
     if (hasCampName && hasStrongContext) candidates.set(line, context);
   }
@@ -207,7 +265,7 @@ function extractCampCandidates(rawText: string, providerName: string) {
 
 export function extractDiscoveryRecords(input: DiscoveryInput, rawText: string, sourceMethod: SourceMethod = "crawler") {
   const text = rawText.replace(/\s+/g, " ").trim();
-  const providerName = input.providerName?.trim() || titleFromUrl(input.sourceUrl);
+  const providerName = input.providerName?.trim() || inferProviderName(input.sourceUrl, rawText);
   const providerId = input.providerId?.trim() || (providerName ? slugify(providerName) : "");
   const county = inferCounty(`${text} ${input.sourceUrl} ${input.notes ?? ""}`, input.county?.trim() || findKnown(text, counties));
   const activity = classifyActivity(text, input.activityType?.trim());
@@ -244,7 +302,7 @@ export function dedupeDiscoveryCamps(camps: DiscoveryCamp[]) {
     const keys = [
       camp.camp_id ? `id:${camp.camp_id}` : "",
       camp.provider_id && camp.camp_name && camp.town && camp.start_date ? `provider:${camp.provider_id}:${camp.camp_name.toLowerCase()}:${camp.town.toLowerCase()}:${camp.start_date}` : "",
-      camp.source_url && camp.camp_name ? `source:${camp.source_url}:${camp.camp_name.toLowerCase()}` : "",
+      camp.source_url && camp.camp_name ? `source:${camp.source_url}:${camp.camp_name.toLowerCase()}:${camp.town.toLowerCase()}:${camp.start_date}` : "",
     ].filter(Boolean);
     if (keys.some((key) => seen.has(key))) return false;
     keys.forEach((key) => seen.add(key));
