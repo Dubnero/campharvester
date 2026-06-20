@@ -5,7 +5,7 @@ const likelyCampLink = /\b(camps?|summer|easter|halloween|holiday|programme|prog
 // TODO: Add Google Maps/search discovery, franchise-wide crawling, and LLM extraction in later phases.
 const blockedLink = /\b(social|facebook|instagram|twitter|x\.com|linkedin|youtube|mailto:|tel:|maps?\.|google\.com\/maps|privacy|terms|cookie|login|account|cart|checkout|payment)\b/i;
 
-type CrawlPage = { url: string; text: string; readableTextLength: number; candidateCount: number; dynamicWarning: boolean };
+type CrawlPage = { url: string; text: string; readableTextLength: number; candidateCount: number; dynamicWarning: boolean; status: "analysed" | "failed"; failureReason?: string; sourceMethod: "crawler" };
 type SkippedUrl = { url: string; reason: string };
 
 function htmlToText(html: string) {
@@ -90,11 +90,21 @@ function hasDynamicWarning(html: string, text: string) {
 }
 
 async function fetchPage(url: string) {
-  const response = await fetch(url, { headers: { "user-agent": "CampHarvester Discovery Assistant" } });
-  if (!response.ok) throw new Error(`Fetch failed with HTTP ${response.status}.`);
-  const html = await response.text();
-  const text = htmlToText(html);
-  return { html, text };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(url, { headers: { "user-agent": "CampHarvester Discovery Assistant" }, signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const html = await response.text();
+    const text = htmlToText(html);
+    if (text.replace(/\s+/g, " ").trim().length === 0) throw new Error("Zero readable text");
+    return { html, text };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw new Error("Timeout");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function POST(request: Request) {
@@ -118,7 +128,7 @@ export async function POST(request: Request) {
       crawled.add(currentUrl);
       try {
         const { html, text } = await fetchPage(currentUrl);
-        pages.push({ url: currentUrl, text, readableTextLength: text.length, candidateCount: campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text) });
+        pages.push({ url: currentUrl, text, readableTextLength: text.length, candidateCount: campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text), status: "analysed", sourceMethod: "crawler" });
         for (const link of extractLinks(html, currentUrl)) {
           discovered.add(link);
           if (queued.has(link) || crawled.has(link)) continue;
@@ -127,7 +137,9 @@ export async function POST(request: Request) {
           else skipped.set(link, decision);
         }
       } catch (error) {
-        skipped.set(currentUrl, error instanceof Error ? error.message : "Fetch failed");
+        const reason = error instanceof Error ? error.message : "Fetch failed";
+        skipped.set(currentUrl, reason);
+        pages.push({ url: currentUrl, text: "", readableTextLength: 0, candidateCount: 0, dynamicWarning: false, status: "failed", failureReason: reason, sourceMethod: "crawler" });
       }
     }
 
@@ -141,7 +153,7 @@ export async function POST(request: Request) {
       analysisLog: {
         sourceUrl: source.toString(),
         discoveredUrls: Array.from(discovered),
-        crawledUrls: pages.map((page) => page.url),
+        crawledUrls: pages.filter((page) => page.status === "analysed").map((page) => page.url),
         skippedUrls: Array.from(skipped.entries()).map(([skippedUrl, reason]) => ({ url: skippedUrl, reason } satisfies SkippedUrl)),
       },
       warnings: pages.some((page) => page.dynamicWarning) ? ["This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed."] : [],
