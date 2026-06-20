@@ -827,3 +827,98 @@ button:disabled:hover {
     font-size: 1.35rem;
   }
 }
+
+.badge.danger {
+  background: #fee4e2;
+  color: var(--danger);
+}
+
+.extraction-summary {
+  display: grid;
+  gap: 1rem;
+}
+
+.summary-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.summary-pills span {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: inline-flex;
+  font-weight: 800;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+}
+
+.camp-review-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 1rem;
+}
+
+.camp-review-card {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.camp-card-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.camp-review-card h3 {
+  margin: 0;
+}
+
+.review-fields {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.review-fields div {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.7rem;
+}
+
+.review-fields span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.review-fields strong {
+  overflow-wrap: anywhere;
+}
+
+.warning-box.compact {
+  padding: 0.75rem;
+}
+
+.card-edit {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .camp-review-grid,
+  .review-fields,
+  .card-edit {
+    grid-template-columns: 1fr;
+  }
+}
