@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 import { getCamps, getProviders, upsertCamps, upsertProviders } from "@/lib/dataRepository";
-import { DiscoveryCamp, DiscoveryProvider, extractDiscoveryRecords, recordsToCsv } from "@/lib/discoveryUtils";
+import { DiscoveryCamp, DiscoveryPageAnalysis, DiscoveryProvider, extractDiscoveryRecords, recordsToCsv } from "@/lib/discoveryUtils";
 import type { Camp, Provider } from "@/lib/types";
 
 type FormState = { sourceUrl: string; providerId: string; providerName: string; county: string; activityType: string; holidayType: string; notes: string };
+type AnalysisLog = { sourceUrl: string; discoveredUrls: string[]; crawledUrls: string[]; skippedUrls: Array<{ url: string; reason: string }> };
 const blankForm: FormState = { sourceUrl: "", providerId: "", providerName: "", county: "", activityType: "", holidayType: "", notes: "" };
 const providerFields: Array<keyof DiscoveryProvider> = ["selected", "needs_review", "confidence", "provider_id", "provider_name", "website", "primary_email", "primary_phone", "primary_county", "activity_category", "provider_type", "status"];
 const campFields: Array<keyof DiscoveryCamp> = ["selected", "needs_review", "camp_id", "provider_id", "camp_name", "county", "town", "address", "eircode", "activity_type", "holiday_type", "age_min", "age_max", "start_date", "end_date", "start_time", "end_time", "half_day_or_full_day", "price", "booking_url", "status"];
@@ -22,6 +23,8 @@ export function DiscoveryAssistant() {
   const [providers, setProviders] = useState<DiscoveryProvider[]>([]);
   const [camps, setCamps] = useState<DiscoveryCamp[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [analysisLog, setAnalysisLog] = useState<AnalysisLog | null>(null);
+  const [pageAnalyses, setPageAnalyses] = useState<DiscoveryPageAnalysis[]>([]);
   const [fetchMessage, setFetchMessage] = useState("");
   const [importSummary, setImportSummary] = useState("");
   const selectedProviders = useMemo(() => providers.filter((provider) => provider.selected && !provider.duplicateWarnings.some((warning) => warning.startsWith("Existing provider found"))), [providers]);
@@ -31,6 +34,8 @@ export function DiscoveryAssistant() {
     event.preventDefault();
     setImportSummary("");
     setWarnings([]);
+    setAnalysisLog(null);
+    setPageAnalyses([]);
     let text = pageText;
     if (!manualMode) {
       const response = await fetch("/api/discovery/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: form.sourceUrl }) });
@@ -38,12 +43,15 @@ export function DiscoveryAssistant() {
       if (!response.ok) { setManualMode(true); setFetchMessage(result.error ?? "Fetch failed. Paste page text instead."); return; }
       text = result.text;
       setPageText(text);
-      setFetchMessage(`Fetched page successfully (${text.length} readable characters).`);
+      setAnalysisLog(result.analysisLog ?? null);
+      setPageAnalyses(result.pages ?? []);
+      setWarnings(result.warnings ?? []);
+      setFetchMessage(`Fetched ${result.pages?.length ?? 1} page(s) successfully (${text.length} readable characters).`);
     }
     const extraction = extractDiscoveryRecords({ sourceUrl: form.sourceUrl, providerId: form.providerId, providerName: form.providerName, county: form.county, activityType: form.activityType, holidayType: form.holidayType, notes: form.notes }, text);
     setProviders(extraction.providers);
     setCamps(extraction.camps);
-    setWarnings(extraction.warnings);
+    setWarnings((current) => Array.from(new Set([...current, ...extraction.warnings])));
     await detectDuplicates(extraction.providers, extraction.camps);
   }
 
@@ -81,11 +89,17 @@ export function DiscoveryAssistant() {
   return <main className="app-shell"><header className="hero"><div><p className="eyebrow">Internal admin · draft discovery</p><h1>Discovery Assistant</h1><p>Analyse provider and camp pages, review deterministic draft records, then import selected unverified drafts.</p></div><div className="hero-actions"><Link className="button-link" href="/">Dashboard</Link></div></header>
     <section className="panel"><h2>Analyse source</h2><form className="edit-form" onSubmit={analyse}>{Object.keys(blankForm).map((key) => <label key={key}>{label(key)}<input value={form[key as keyof FormState]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} required={key === "sourceUrl"} /></label>)}<div className="form-actions wide-field"><button type="submit">Analyse page</button><button type="button" className="secondary" onClick={() => setManualMode(true)}>Paste page text instead</button></div></form>{manualMode ? <label className="wide-field">Paste page text instead<textarea rows={8} value={pageText} onChange={(event) => setPageText(event.target.value)} /></label> : null}<p>{fetchMessage}</p></section>
     <section className="stats-grid"><article><span>Source URL analysed</span><strong>{form.sourceUrl || "—"}</strong></article><article><span>Text extracted length</span><strong>{pageText.length}</strong></article><article><span>Possible providers</span><strong>{providers.length}</strong></article><article><span>Possible camps</span><strong>{camps.length}</strong></article></section>
+    <AnalysisLogPanel log={analysisLog} pages={pageAnalyses} />
     <ExtractionSummary providers={providers} camps={camps} warnings={warnings} />
     <ReviewTable title="Providers" fields={providerFields} rows={providers} update={updateProvider} remove={(index) => setProviders((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
     <CampCards camps={camps} update={updateCamp} remove={(index) => setCamps((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
     <details className="panel"><summary>Advanced spreadsheet view</summary><ReviewTable title="Camps" fields={campFields} rows={camps} update={updateCamp} remove={(index) => setCamps((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} /></details>
     <section className="panel"><div className="form-actions"><button type="button" className="secondary" onClick={downloadCsv} disabled={!providers.length && !camps.length}>Export CSV</button><button type="button" onClick={importSelected} disabled={!selectedProviders.length && !selectedCamps.length}>Import selected drafts</button></div>{importSummary ? <p>{importSummary}</p> : null}</section></main>;
+}
+
+function AnalysisLogPanel({ log, pages }: { log: AnalysisLog | null; pages: DiscoveryPageAnalysis[] }) {
+  if (!log && pages.length === 0) return null;
+  return <section className="panel"><h2>URL analysis log</h2>{log ? <div className="summary-list"><p><strong>Source URL:</strong> {log.sourceUrl}</p><p><strong>URLs discovered:</strong> {log.discoveredUrls.length}</p><ul>{log.discoveredUrls.slice(0, 20).map((url) => <li key={url}>{url}</li>)}</ul><p><strong>URLs crawled:</strong> {log.crawledUrls.length}</p><ul>{log.crawledUrls.map((url) => <li key={url}>{url}</li>)}</ul><p><strong>URLs skipped:</strong> {log.skippedUrls.length}</p><ul>{log.skippedUrls.slice(0, 30).map((item) => <li key={item.url}>{item.url} — {item.reason}</li>)}</ul></div> : null}<div className="table-wrap"><table><thead><tr><th>URL</th><th>Readable text length</th><th>Camp candidates</th><th>Dynamic warning</th></tr></thead><tbody>{pages.map((page) => <tr key={page.url}><td>{page.url}</td><td>{page.readableTextLength}</td><td>{page.candidateCount}</td><td>{page.dynamicWarning ? "Yes" : "No"}</td></tr>)}</tbody></table></div></section>;
 }
 
 function ReviewTable<T extends DiscoveryProvider | DiscoveryCamp>({ title, fields, rows, update, remove }: { title: string; fields: Array<keyof T>; rows: T[]; update: (index: number, field: keyof T, value: string | boolean | number) => void; remove: (index: number) => void }) {

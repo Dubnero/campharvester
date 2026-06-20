@@ -4,6 +4,7 @@ export type DiscoveryInput = { sourceUrl: string; providerId?: string; providerN
 export type ConfidenceBreakdown = Record<string, number>;
 export type DiscoveryProvider = Provider & { selected: boolean; needs_review: boolean; duplicateWarnings: string[]; confidence: number; fieldConfidence: ConfidenceBreakdown; extractionWarnings: string[] };
 export type DiscoveryCamp = Camp & { selected: boolean; needs_review: boolean; duplicateWarnings: string[]; confidence: number; fieldConfidence: ConfidenceBreakdown; extractionWarnings: string[] };
+export type DiscoveryPageAnalysis = { url: string; text?: string; readableTextLength: number; candidateCount: number; dynamicWarning?: boolean };
 
 const counties = ["Carlow", "Cavan", "Clare", "Cork", "Donegal", "Dublin", "Galway", "Kerry", "Kildare", "Kilkenny", "Laois", "Leitrim", "Limerick", "Longford", "Louth", "Mayo", "Meath", "Monaghan", "Offaly", "Roscommon", "Sligo", "Tipperary", "Waterford", "Westmeath", "Wexford", "Wicklow"];
 const holidays: HolidayType[] = ["Summer", "Easter", "Halloween", "February Midterm", "October Midterm", "Christmas", "Other"];
@@ -14,6 +15,7 @@ const eircodeRegex = /\b(?:[AC-FHKNPRTV-Y]\d{2}|D6W)\s?[0-9AC-FHKNPRTV-Y]{4}\b/i
 export function slugify(value: string) { return value.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 72); }
 function today() { return new Date().toISOString().slice(0, 10); }
 function firstMatch(text: string, regex: RegExp) { return text.match(regex)?.[0] ?? ""; }
+function firstUrl(text: string, regex: RegExp) { return text.match(regex)?.[0] ?? ""; }
 function findKnown(text: string, values: readonly string[]) { const lower = text.toLowerCase(); return values.find((value) => lower.includes(value.toLowerCase())) ?? ""; }
 function titleFromUrl(sourceUrl: string) { try { const url = new URL(sourceUrl); return url.hostname.replace(/^www\./, "").split(".")[0].replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); } catch { return ""; } }
 function websiteFromUrl(sourceUrl: string) { try { const url = new URL(sourceUrl); return `${url.protocol}//${url.host}`; } catch { return sourceUrl; } }
@@ -67,14 +69,28 @@ export function extractDiscoveryRecords(input: DiscoveryInput, rawText: string) 
     const ageMin = Number(firstMatch(context, /(?:(?:age[s]?|aged)\s*)\d{1,2}/i).match(/\d{1,2}/)?.[0] ?? 0);
     const ageMax = Number(context.match(/(?:age[s]?|aged)?\s*\d{1,2}\s?(?:-|to)\s?(\d{1,2})/i)?.[1] ?? 0);
     const campActivity = classifyActivity(`${name} ${context}`, activity);
-    const bookingUrl = /book\s+(now|online)|booking/i.test(context) ? input.sourceUrl : "";
+    const bookingUrl = firstUrl(context, /https?:\/\/\S*(?:book|booking|enrol|enroll|schedule|class|profile\.php|selected_schedule)\S*/i).replace(/[),.;]+$/, "") || (/book\s+(now|online)|booking|enrol|schedule|selected_schedule|profile\.php/i.test(context) ? input.sourceUrl : "");
     const fieldConfidence = { camp_name: 88, county: county ? 78 : 0, town: 0, address: 0, eircode: globalEircode ? 100 : 0, activity_type: campActivity ? 86 : 0, holiday_type: findHoliday(`${name} ${context}`) !== "Other" ? 88 : 35, age: ageMin || ageMax ? 88 : 0, start_date: date ? 76 : 0, price: price ? 100 : 0, booking_url: bookingUrl ? 75 : 0 };
     const confidence = confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 2, start_date: 2, price: 1, booking_url: 1, activity_type: 1 });
     const extractionWarnings = [date ? "" : "Missing dates", price ? "" : "No price detected", bookingUrl ? "" : "Missing booking URL"].filter(Boolean);
     return { camp_id: slugify(`${providerId || "provider"}-${name}`) || `discovered-camp-${index + 1}`, provider_id: providerId, camp_name: name, county, town: "", address: "", eircode: globalEircode, activity_type: campActivity, holiday_type: findHoliday(`${name} ${context}`, input.holidayType?.trim()), age_min: ageMin, age_max: ageMax, start_date: date, end_date: "", start_time: time, end_time: "", half_day_or_full_day: /half\s?day/i.test(context) ? "Half day" : /full\s?day/i.test(context) ? "Full day" : "Unknown", price, booking_url: bookingUrl, status: "draft", verified: false, featured: false, source_url: input.sourceUrl, last_checked: today(), selected: confidence >= 60, needs_review: true, duplicateWarnings: [], confidence, fieldConfidence, extractionWarnings };
   });
   const warnings = [providerName ? "" : "Provider name could not be determined.", camps.length ? "" : "No high-confidence camp offerings found; generic navigation items were ignored.", camps.length && camps.every((camp) => !camp.price) ? "No prices detected" : "", camps.some((camp) => !camp.start_date) ? `${camps.filter((camp) => !camp.start_date).length} camp(s) missing dates` : "", camps.some((camp) => !camp.booking_url) ? "Booking links not detected for all camps" : ""].filter(Boolean);
-  return { providers: provider.provider_id || provider.provider_name ? [provider] : [], camps, warnings, textLength: text.length };
+  return { providers: provider.provider_id || provider.provider_name ? [provider] : [], camps: dedupeDiscoveryCamps(camps), warnings, textLength: text.length };
+}
+
+export function dedupeDiscoveryCamps(camps: DiscoveryCamp[]) {
+  const seen = new Set<string>();
+  return camps.filter((camp) => {
+    const keys = [
+      camp.camp_id ? `id:${camp.camp_id}` : "",
+      camp.provider_id && camp.camp_name && camp.town && camp.start_date ? `provider:${camp.provider_id}:${camp.camp_name.toLowerCase()}:${camp.town.toLowerCase()}:${camp.start_date}` : "",
+      camp.source_url && camp.camp_name ? `source:${camp.source_url}:${camp.camp_name.toLowerCase()}` : "",
+    ].filter(Boolean);
+    if (keys.some((key) => seen.has(key))) return false;
+    keys.forEach((key) => seen.add(key));
+    return true;
+  });
 }
 
 export function recordsToCsv(records: Array<Record<string, unknown>>) {

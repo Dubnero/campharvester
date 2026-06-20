@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
 
+const MAX_PAGES = 10;
+const likelyCampLink = /\b(camps?|summer|easter|halloween|holiday|programme|program|book(?:ing)?|enrol|enroll|schedule|class|profile\.php|selected_schedule)\b/i;
+// TODO: Add Google Maps/search discovery, franchise-wide crawling, and LLM extraction in later phases.
+const blockedLink = /\b(social|facebook|instagram|twitter|x\.com|linkedin|youtube|mailto:|tel:|maps?\.|google\.com\/maps|privacy|terms|cookie|login|account|cart|checkout|payment)\b/i;
+
+type CrawlPage = { url: string; text: string; readableTextLength: number; candidateCount: number; dynamicWarning: boolean };
+type SkippedUrl = { url: string; reason: string };
+
 function htmlToText(html: string) {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -9,8 +17,69 @@ function htmlToText(html: string) {
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function extractLinks(html: string, baseUrl: string) {
+  const links: string[] = [];
+  const linkRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = linkRegex.exec(html)) !== null) {
+    try {
+      const link = new URL(match[1], baseUrl);
+      link.hash = "";
+      links.push(link.toString());
+    } catch {
+      // Ignore malformed hrefs.
+    }
+  }
+  return Array.from(new Set(links));
+}
+
+function rootDomain(hostname: string) {
+  const parts = hostname.replace(/^www\./, "").split(".");
+  return parts.slice(Math.max(0, parts.length - 2)).join(".");
+}
+
+function providerToken(hostname: string) {
+  return hostname.replace(/^www\./, "").split(".")[0].replace(/\d+$/g, "").toLowerCase();
+}
+
+function isRelatedDomain(source: URL, target: URL) {
+  if (source.hostname === target.hostname || rootDomain(source.hostname) === rootDomain(target.hostname)) return true;
+  const sourceToken = providerToken(source.hostname);
+  return sourceToken.length >= 4 && target.hostname.toLowerCase().includes(sourceToken);
+}
+
+function linkDecision(source: URL, link: string) {
+  if (blockedLink.test(link)) return "Skipped unrelated/navigation/payment link";
+  let parsed: URL;
+  try { parsed = new URL(link); } catch { return "Invalid URL"; }
+  if (!["http:", "https:"].includes(parsed.protocol)) return "Unsupported protocol";
+  if (!isRelatedDomain(source, parsed)) return "External domain is not clearly related to provider";
+  if (!likelyCampLink.test(link)) return "No camp/booking keyword";
+  return "crawl";
+}
+
+function campCandidateCount(text: string) {
+  const lines = text.split(/\n+/).filter((line) => /\b(camp|academy|workshop|course|club)\b/i.test(line) && /\b(summer|easter|halloween|midterm|christmas|ages?|aged|€|book|date|time)\b/i.test(line));
+  return lines.length;
+}
+
+function hasDynamicWarning(html: string, text: string) {
+  const scriptCount = (html.match(/<script\b/gi) ?? []).length;
+  return text.replace(/\s+/g, " ").trim().length < 700 && scriptCount >= 8;
+}
+
+async function fetchPage(url: string) {
+  const response = await fetch(url, { headers: { "user-agent": "CampHarvester Discovery Assistant" } });
+  if (!response.ok) throw new Error(`Fetch failed with HTTP ${response.status}.`);
+  const html = await response.text();
+  const text = htmlToText(html);
+  return { html, text };
 }
 
 export async function POST(request: Request) {
@@ -18,12 +87,50 @@ export async function POST(request: Request) {
   if (!url || typeof url !== "string") return NextResponse.json({ error: "Source URL is required." }, { status: 400 });
 
   try {
-    const parsed = new URL(url);
-    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Only http and https URLs are supported.");
-    const response = await fetch(parsed.toString(), { headers: { "user-agent": "CampHarvester Discovery Assistant" } });
-    if (!response.ok) throw new Error(`Fetch failed with HTTP ${response.status}.`);
-    const html = await response.text();
-    return NextResponse.json({ text: htmlToText(html), length: html.length });
+    const source = new URL(url);
+    if (!["http:", "https:"].includes(source.protocol)) throw new Error("Only http and https URLs are supported.");
+
+    const queue = [source.toString()];
+    const queued = new Set(queue);
+    const crawled = new Set<string>();
+    const discovered = new Set<string>();
+    const skipped = new Map<string, string>();
+    const pages: CrawlPage[] = [];
+
+    while (queue.length && pages.length < MAX_PAGES) {
+      const currentUrl = queue.shift() as string;
+      if (crawled.has(currentUrl)) continue;
+      crawled.add(currentUrl);
+      try {
+        const { html, text } = await fetchPage(currentUrl);
+        pages.push({ url: currentUrl, text, readableTextLength: text.length, candidateCount: campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text) });
+        for (const link of extractLinks(html, currentUrl)) {
+          discovered.add(link);
+          if (queued.has(link) || crawled.has(link)) continue;
+          const decision = linkDecision(source, link);
+          if (decision === "crawl") { queue.push(link); queued.add(link); }
+          else skipped.set(link, decision);
+        }
+      } catch (error) {
+        skipped.set(currentUrl, error instanceof Error ? error.message : "Fetch failed");
+      }
+    }
+
+    for (const pending of queue) skipped.set(pending, `Safe crawl limit reached (${MAX_PAGES} pages).`);
+
+    const text = pages.map((page) => `\n\nSource URL: ${page.url}\n${page.text}`).join("\n").trim();
+    return NextResponse.json({
+      text,
+      length: text.length,
+      pages,
+      analysisLog: {
+        sourceUrl: source.toString(),
+        discoveredUrls: Array.from(discovered),
+        crawledUrls: pages.map((page) => page.url),
+        skippedUrls: Array.from(skipped.entries()).map(([skippedUrl, reason]) => ({ url: skippedUrl, reason } satisfies SkippedUrl)),
+      },
+      warnings: pages.some((page) => page.dynamicWarning) ? ["This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed."] : [],
+    });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to fetch URL." }, { status: 502 });
   }
