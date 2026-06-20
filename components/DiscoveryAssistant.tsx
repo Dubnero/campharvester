@@ -18,6 +18,19 @@ function methodBadge(method: DiscoveryProvider["source_method"] | DiscoveryCamp[
 function asImportProvider(provider: DiscoveryProvider): Provider { const { selected, needs_review, duplicateWarnings, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = provider; return { ...row, status: "draft", verified: false, featured: false }; }
 const developerDebug = true;
 
+function normalizeProviderMatchValue(value: string) { return value.toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function providerMatches(existing: Provider, provider: DiscoveryProvider) {
+  const existingName = normalizeProviderMatchValue(existing.provider_name || "");
+  const providerName = normalizeProviderMatchValue(provider.provider_name || "");
+  const existingWebsite = normalizeProviderMatchValue(existing.website || "");
+  const providerWebsite = normalizeProviderMatchValue(provider.website || "");
+  return existing.provider_id === provider.provider_id || Boolean(providerName && existingName === providerName) || Boolean(provider.provider_name === "Bricks4Kidz" && existingName.includes("bricks4kidz")) || Boolean(providerWebsite && existingWebsite === providerWebsite);
+}
+function nextProviderId(existingProviders: Provider[], draftProviders: DiscoveryProvider[]) {
+  const ids = [...existingProviders.map((provider) => provider.provider_id), ...draftProviders.map((provider) => provider.provider_id)].map((id) => id.match(/^P(\d{4})$/)?.[1]).filter(Boolean).map(Number);
+  return `P${String((ids.length ? Math.max(...ids) : 0) + 1).padStart(4, "0")}`;
+}
+
 function asImportCamp(camp: DiscoveryCamp): Camp { const { selected, needs_review, duplicateWarnings, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = camp; return { ...row, status: "draft", verified: false, featured: false }; }
 
 export function DiscoveryAssistant() {
@@ -104,13 +117,22 @@ export function DiscoveryAssistant() {
 
   async function detectDuplicates(nextProviders = providers, nextCamps = camps) {
     const [existingProviders, existingCamps] = await Promise.all([getProviders(), getCamps()]);
+    let nextDraftProviderId = nextProviderId(existingProviders.data, nextProviders);
+    const providerIdMap = new Map<string, string>();
     const flaggedProviders = nextProviders.map((provider) => {
-      const match = existingProviders.data.find((existing) => existing.provider_id === provider.provider_id || (provider.provider_name && existing.provider_name.toLowerCase() === provider.provider_name.toLowerCase()) || (provider.website && existing.website === provider.website));
-      if (!match) return provider;
-      return { ...provider, provider_id: match.provider_id, duplicateWarnings: [`Existing provider found: ${match.provider_id} / ${match.provider_name}`], selected: false };
+      const match = existingProviders.data.find((existing) => providerMatches(existing, provider));
+      const originalProviderId = provider.provider_id;
+      if (match) {
+        providerIdMap.set(originalProviderId, match.provider_id);
+        return { ...provider, provider_id: match.provider_id, provider_name: match.provider_name, duplicateWarnings: [`Existing provider found: ${match.provider_id} / ${match.provider_name}`], selected: false };
+      }
+      const assignedProviderId = /^P\d{4}$/.test(provider.provider_id) ? provider.provider_id : nextDraftProviderId;
+      providerIdMap.set(originalProviderId, assignedProviderId);
+      if (assignedProviderId === nextDraftProviderId) nextDraftProviderId = `P${String(Number(nextDraftProviderId.slice(1)) + 1).padStart(4, "0")}`;
+      return { ...provider, provider_id: assignedProviderId };
     });
     const flaggedCamps = nextCamps.map((camp) => {
-      const providerId = flaggedProviders.find((provider) => provider.provider_id === camp.provider_id || provider.provider_name === nextProviders[0]?.provider_name)?.provider_id ?? camp.provider_id;
+      const providerId = providerIdMap.get(camp.provider_id) ?? flaggedProviders.find((provider) => provider.provider_name === nextProviders[0]?.provider_name)?.provider_id ?? camp.provider_id;
       const updatedCamp = { ...camp, provider_id: providerId };
       const duplicateWarnings = existingCamps.data.filter((existing) => existing.camp_id === updatedCamp.camp_id || (existing.provider_id === updatedCamp.provider_id && existing.camp_name.toLowerCase() === updatedCamp.camp_name.toLowerCase() && existing.town.toLowerCase() === updatedCamp.town.toLowerCase() && existing.start_date === updatedCamp.start_date)).map((existing) => `Existing camp found: ${existing.camp_id} / ${existing.camp_name}`);
       return { ...updatedCamp, duplicateWarnings, selected: duplicateWarnings.length === 0 && updatedCamp.selected };
