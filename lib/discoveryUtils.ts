@@ -2,9 +2,10 @@ import type { Camp, HolidayType, Provider } from "./types";
 
 export type DiscoveryInput = { sourceUrl: string; providerId?: string; providerName?: string; county?: string; activityType?: string; holidayType?: string; notes?: string };
 export type ConfidenceBreakdown = Record<string, number>;
-export type DiscoveryProvider = Provider & { selected: boolean; needs_review: boolean; duplicateWarnings: string[]; confidence: number; fieldConfidence: ConfidenceBreakdown; extractionWarnings: string[] };
-export type DiscoveryCamp = Camp & { selected: boolean; needs_review: boolean; duplicateWarnings: string[]; confidence: number; fieldConfidence: ConfidenceBreakdown; extractionWarnings: string[] };
-export type DiscoveryPageAnalysis = { url: string; text?: string; readableTextLength: number; candidateCount: number; dynamicWarning?: boolean };
+export type SourceMethod = "crawler" | "manual_paste";
+export type DiscoveryProvider = Provider & { selected: boolean; needs_review: boolean; duplicateWarnings: string[]; confidence: number; fieldConfidence: ConfidenceBreakdown; extractionWarnings: string[]; source_method: SourceMethod };
+export type DiscoveryCamp = Camp & { selected: boolean; needs_review: boolean; duplicateWarnings: string[]; confidence: number; fieldConfidence: ConfidenceBreakdown; extractionWarnings: string[]; source_method: SourceMethod };
+export type DiscoveryPageAnalysis = { url: string; text?: string; readableTextLength: number; candidateCount: number; dynamicWarning?: boolean; status: "analysed" | "failed" | "manual_added" | "extracted"; failureReason?: string; sourceMethod: SourceMethod };
 
 const counties = ["Carlow", "Cavan", "Clare", "Cork", "Donegal", "Dublin", "Galway", "Kerry", "Kildare", "Kilkenny", "Laois", "Leitrim", "Limerick", "Longford", "Louth", "Mayo", "Meath", "Monaghan", "Offaly", "Roscommon", "Sligo", "Tipperary", "Waterford", "Westmeath", "Wexford", "Wicklow"];
 const holidays: HolidayType[] = ["Summer", "Easter", "Halloween", "February Midterm", "October Midterm", "Christmas", "Other"];
@@ -51,14 +52,14 @@ function extractCampCandidates(rawText: string, providerName: string) {
   return Array.from(candidates.entries()).slice(0, 8).map(([name, context]) => ({ name, context }));
 }
 
-export function extractDiscoveryRecords(input: DiscoveryInput, rawText: string) {
+export function extractDiscoveryRecords(input: DiscoveryInput, rawText: string, sourceMethod: SourceMethod = "crawler") {
   const text = rawText.replace(/\s+/g, " ").trim();
   const providerName = input.providerName?.trim() || titleFromUrl(input.sourceUrl);
   const providerId = input.providerId?.trim() || (providerName ? slugify(providerName) : "");
   const county = input.county?.trim() || findKnown(text, counties);
   const activity = classifyActivity(text, input.activityType?.trim());
   const providerFieldConfidence = { provider_name: providerName ? (input.providerName ? 100 : 78) : 0, website: input.sourceUrl ? 95 : 0, primary_email: validEmail(text) ? 100 : 0, primary_phone: validPhone(text) ? 90 : 0, primary_county: county ? (input.county ? 100 : 78) : 0, activity_category: activity ? 84 : 0 };
-  const provider: DiscoveryProvider = { provider_id: providerId, provider_name: providerName, website: websiteFromUrl(input.sourceUrl), source_url: input.sourceUrl, primary_email: validEmail(text), primary_phone: validPhone(text), description: "", primary_county: county, activity_category: activity, provider_type: "", status: "draft", verified: false, featured: false, last_checked: today(), notes: input.notes ?? "", selected: Boolean(providerId && providerName), needs_review: true, duplicateWarnings: [], confidence: confidenceScore(providerFieldConfidence, { provider_name: 3, website: 2, primary_email: 1, primary_phone: 1, primary_county: 1, activity_category: 1 }), fieldConfidence: providerFieldConfidence, extractionWarnings: [] };
+  const provider: DiscoveryProvider = { provider_id: providerId, provider_name: providerName, website: websiteFromUrl(input.sourceUrl), source_url: input.sourceUrl, primary_email: validEmail(text), primary_phone: validPhone(text), description: "", primary_county: county, activity_category: activity, provider_type: "", status: "draft", verified: false, featured: false, last_checked: today(), notes: input.notes ?? "", selected: Boolean(providerId && providerName), needs_review: true, duplicateWarnings: [], confidence: confidenceScore(providerFieldConfidence, { provider_name: 3, website: 2, primary_email: 1, primary_phone: 1, primary_county: 1, activity_category: 1 }), fieldConfidence: providerFieldConfidence, extractionWarnings: [], source_method: sourceMethod };
 
   const candidates = extractCampCandidates(rawText, providerName);
   const globalEircode = validEircode(text);
@@ -73,7 +74,7 @@ export function extractDiscoveryRecords(input: DiscoveryInput, rawText: string) 
     const fieldConfidence = { camp_name: 88, county: county ? 78 : 0, town: 0, address: 0, eircode: globalEircode ? 100 : 0, activity_type: campActivity ? 86 : 0, holiday_type: findHoliday(`${name} ${context}`) !== "Other" ? 88 : 35, age: ageMin || ageMax ? 88 : 0, start_date: date ? 76 : 0, price: price ? 100 : 0, booking_url: bookingUrl ? 75 : 0 };
     const confidence = confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 2, start_date: 2, price: 1, booking_url: 1, activity_type: 1 });
     const extractionWarnings = [date ? "" : "Missing dates", price ? "" : "No price detected", bookingUrl ? "" : "Missing booking URL"].filter(Boolean);
-    return { camp_id: slugify(`${providerId || "provider"}-${name}`) || `discovered-camp-${index + 1}`, provider_id: providerId, camp_name: name, county, town: "", address: "", eircode: globalEircode, activity_type: campActivity, holiday_type: findHoliday(`${name} ${context}`, input.holidayType?.trim()), age_min: ageMin, age_max: ageMax, start_date: date, end_date: "", start_time: time, end_time: "", half_day_or_full_day: /half\s?day/i.test(context) ? "Half day" : /full\s?day/i.test(context) ? "Full day" : "Unknown", price, booking_url: bookingUrl, status: "draft", verified: false, featured: false, source_url: input.sourceUrl, last_checked: today(), selected: confidence >= 60, needs_review: true, duplicateWarnings: [], confidence, fieldConfidence, extractionWarnings };
+    return { camp_id: slugify(`${providerId || "provider"}-${name}`) || `discovered-camp-${index + 1}`, provider_id: providerId, camp_name: name, county, town: "", address: "", eircode: globalEircode, activity_type: campActivity, holiday_type: findHoliday(`${name} ${context}`, input.holidayType?.trim()), age_min: ageMin, age_max: ageMax, start_date: date, end_date: "", start_time: time, end_time: "", half_day_or_full_day: /half\s?day/i.test(context) ? "Half day" : /full\s?day/i.test(context) ? "Full day" : "Unknown", price, booking_url: bookingUrl, status: "draft", verified: false, featured: false, source_url: input.sourceUrl, last_checked: today(), selected: confidence >= 60, needs_review: true, duplicateWarnings: [], confidence, fieldConfidence, extractionWarnings, source_method: sourceMethod };
   });
   const warnings = [providerName ? "" : "Provider name could not be determined.", camps.length ? "" : "No high-confidence camp offerings found; generic navigation items were ignored.", camps.length && camps.every((camp) => !camp.price) ? "No prices detected" : "", camps.some((camp) => !camp.start_date) ? `${camps.filter((camp) => !camp.start_date).length} camp(s) missing dates` : "", camps.some((camp) => !camp.booking_url) ? "Booking links not detected for all camps" : ""].filter(Boolean);
   return { providers: provider.provider_id || provider.provider_name ? [provider] : [], camps: dedupeDiscoveryCamps(camps), warnings, textLength: text.length };
@@ -95,7 +96,7 @@ export function dedupeDiscoveryCamps(camps: DiscoveryCamp[]) {
 
 export function recordsToCsv(records: Array<Record<string, unknown>>) {
   if (records.length === 0) return "";
-  const headers = Object.keys(records[0]).filter((key) => !["selected", "duplicateWarnings", "fieldConfidence", "extractionWarnings"].includes(key));
+  const headers = Object.keys(records[0]).filter((key) => !["selected", "needs_review", "duplicateWarnings", "fieldConfidence", "extractionWarnings", "confidence", "source_method"].includes(key));
   const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   return [headers.join(","), ...records.map((row) => headers.map((header) => escape(row[header])).join(","))].join("\n");
 }
