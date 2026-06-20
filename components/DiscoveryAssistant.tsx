@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 import { getCamps, getProviders, upsertCamps, upsertProviders } from "@/lib/dataRepository";
-import { DiscoveryCamp, DiscoveryPageAnalysis, DiscoveryProvider, dedupeDiscoveryCamps, extractDiscoveryRecords, recordsToCsv } from "@/lib/discoveryUtils";
+import { DiscoveryCamp, DiscoveryPageAnalysis, DiscoveryProvider, ExtractionPipelineDebug, buildExtractionDebug, dedupeDiscoveryCamps, extractDiscoveryRecords, recordsToCsv } from "@/lib/discoveryUtils";
 import type { Camp, Provider } from "@/lib/types";
 
 type FormState = { sourceUrl: string; providerId: string; providerName: string; county: string; activityType: string; holidayType: string; notes: string };
@@ -16,6 +16,8 @@ const campFields: Array<keyof DiscoveryCamp> = ["selected", "needs_review", "cam
 function label(field: string) { return field.replaceAll("_", " "); }
 function methodBadge(method: DiscoveryProvider["source_method"] | DiscoveryCamp["source_method"]) { return method === "manual_paste" ? "📋 Manual" : "🕷 Crawled"; }
 function asImportProvider(provider: DiscoveryProvider): Provider { const { selected, needs_review, duplicateWarnings, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = provider; return { ...row, status: "draft", verified: false, featured: false }; }
+const developerDebug = true;
+
 function asImportCamp(camp: DiscoveryCamp): Camp { const { selected, needs_review, duplicateWarnings, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = camp; return { ...row, status: "draft", verified: false, featured: false }; }
 
 export function DiscoveryAssistant() {
@@ -32,6 +34,7 @@ export function DiscoveryAssistant() {
   const [pageAnalyses, setPageAnalyses] = useState<DiscoveryPageAnalysis[]>([]);
   const [fetchMessage, setFetchMessage] = useState("");
   const [importSummary, setImportSummary] = useState("");
+  const [debugItems, setDebugItems] = useState<ExtractionPipelineDebug[]>([]);
   const selectedProviders = useMemo(() => providers.filter((provider) => provider.selected && !provider.duplicateWarnings.some((warning) => warning.startsWith("Existing provider found"))), [providers]);
   const selectedCamps = useMemo(() => camps.filter((camp) => camp.selected && camp.duplicateWarnings.length === 0), [camps]);
 
@@ -40,6 +43,7 @@ export function DiscoveryAssistant() {
       ...pages.filter((page) => page.status === "analysed" && page.text).map((page) => ({ url: page.url, text: page.text ?? "", method: page.sourceMethod })),
       ...Object.values(manual).filter((page) => page.text.trim()).map((page) => ({ url: page.url, text: page.text, method: "manual_paste" as const })),
     ];
+    if (developerDebug) setDebugItems(inputs.map((input) => buildExtractionDebug({ sourceUrl: input.url, providerId: form.providerId, providerName: form.providerName, county: form.county, activityType: form.activityType, holidayType: form.holidayType, notes: form.notes }, input.text, input.method)));
     const extracted = inputs.map((input) => extractDiscoveryRecords({ sourceUrl: input.url, providerId: form.providerId, providerName: form.providerName, county: form.county, activityType: form.activityType, holidayType: form.holidayType, notes: form.notes }, input.text, input.method));
     const providerMap = new Map<string, DiscoveryProvider>();
     for (const provider of extracted.flatMap((item) => item.providers)) {
@@ -66,6 +70,7 @@ export function DiscoveryAssistant() {
     setPageAnalyses([]);
     setManualPages({});
     setActiveManualUrl("");
+    setDebugItems([]);
     if (!manualMode) {
       const response = await fetch("/api/discovery/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: form.sourceUrl }) });
       const result = await response.json();
@@ -125,6 +130,7 @@ export function DiscoveryAssistant() {
     <section className="panel"><h2>Analyse source</h2><form className="edit-form" onSubmit={analyse}>{Object.keys(blankForm).map((key) => <label key={key}>{label(key)}<input value={form[key as keyof FormState]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} required={key === "sourceUrl"} /></label>)}<div className="form-actions wide-field"><button type="submit">Analyse page</button><button type="button" className="secondary" onClick={() => setManualMode(true)}>Paste page text instead</button></div></form>{manualMode ? <label className="wide-field">Paste page text instead<textarea rows={8} value={pageText} onChange={(event) => setPageText(event.target.value)} /></label> : null}<p>{fetchMessage}</p></section>
     <section className="stats-grid"><article><span>Source URL analysed</span><strong>{form.sourceUrl || "—"}</strong></article><article><span>Text extracted length</span><strong>{pageText.length + Object.values(manualPages).reduce((sum, page) => sum + page.text.length, 0)}</strong></article><article><span>Possible providers</span><strong>{providers.length}</strong></article><article><span>Possible camps</span><strong>{camps.length}</strong></article></section>
     <AnalysisLogPanel log={analysisLog} pages={pageAnalyses} activeManualUrl={activeManualUrl} manualDraft={manualDraft} onPaste={(url) => { setActiveManualUrl(url); setManualDraft(manualPages[url]?.text ?? ""); }} onDraftChange={setManualDraft} onSubmitManual={submitManualPage} />
+    {developerDebug ? <DeveloperExtractionDebug items={debugItems} /> : null}
     <ExtractionSummary providers={providers} camps={camps} warnings={warnings} />
     <ReviewTable title="Providers" fields={providerFields} rows={providers} update={updateProvider} remove={(index) => setProviders((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
     <CampCards camps={camps} update={updateCamp} remove={(index) => setCamps((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
@@ -135,6 +141,12 @@ export function DiscoveryAssistant() {
 function AnalysisLogPanel({ log, pages, activeManualUrl, manualDraft, onPaste, onDraftChange, onSubmitManual }: { log: AnalysisLog | null; pages: DiscoveryPageAnalysis[]; activeManualUrl: string; manualDraft: string; onPaste: (url: string) => void; onDraftChange: (value: string) => void; onSubmitManual: () => void }) {
   if (!log && pages.length === 0) return null;
   return <section className="panel"><h2>URL status</h2>{log ? <p className="empty-state">{log.discoveredUrls.length} discovered URL(s). Failed or blocked pages can be extended with manual paste.</p> : null}<div className="summary-list"><ul>{pages.map((page) => <li key={page.url}>{page.status === "failed" ? "✗" : "✓"} {page.url} {page.failureReason ? `(${page.failureReason})` : page.dynamicWarning ? "(possible JavaScript-rendered content)" : "analysed"} {page.status === "extracted" ? <><br />📋 Manual paste added<br />✓ Page extracted</> : null} {page.status !== "extracted" && (page.status === "failed" || page.dynamicWarning) ? <button type="button" className="secondary" onClick={() => onPaste(page.url)}>Paste page text</button> : null}</li>)}</ul></div>{activeManualUrl ? <div className="manual-paste-box"><h3>Paste page text</h3><p><strong>Source URL:</strong> {activeManualUrl}</p><textarea rows={12} value={manualDraft} onChange={(event) => onDraftChange(event.target.value)} /><div className="form-actions"><button type="button" onClick={onSubmitManual} disabled={!manualDraft.trim()}>Extract pasted page</button></div></div> : null}</section>;
+}
+
+
+function DeveloperExtractionDebug({ items }: { items: ExtractionPipelineDebug[] }) {
+  if (!items.length) return null;
+  return <details className="panel developer-debug" open><summary>Developer Extraction Debug</summary>{items.map((item) => <article className="debug-page" key={`${item.sourceUrl}-${item.sourceMethod}`}><h3>{item.sourceUrl}</h3><p><span className="badge">{methodBadge(item.sourceMethod)}</span></p><section><h4>1. Raw extracted text</h4><pre>{item.rawTextPreview}</pre></section><section><h4>2. Extraction pipeline</h4><ul className="debug-list">{item.stages.map((stage) => <li key={stage.label}>{stage.passed ? "✓" : "✗"} {stage.label}: {stage.count}</li>)}</ul></section><section><h4>3. Regex matches</h4>{item.regexMatches.length ? <div className="debug-grid">{item.regexMatches.map((match, index) => <div key={`${match.type}-${match.value}-${index}`}><strong>{match.type}:</strong><pre>{match.value}</pre></div>)}</div> : <p className="empty-state">No regex matches found.</p>}</section><section><h4>4. Candidate rows</h4>{item.candidateRows.length ? item.candidateRows.map((row, index) => <div className="debug-card" key={`${row.extractedText}-${index}`}><strong>Candidate {index + 1}</strong><pre>{row.extractedText}</pre><strong>Parsed fields</strong><dl className="debug-fields"><dt>Matched age string</dt><dd>{String(row.parsedFields.matched_age || "—")}</dd><dt>Parsed age_min</dt><dd>{String(row.parsedFields.age_min || "—")}</dd><dt>Parsed age_max</dt><dd>{String(row.parsedFields.age_max || "—")}</dd><dt>Matched time string</dt><dd>{String(row.parsedFields.matched_time || "—")}</dd><dt>Parsed start_time</dt><dd>{String(row.parsedFields.start_time || "—")}</dd><dt>Parsed end_time</dt><dd>{String(row.parsedFields.end_time || "—")}</dd></dl><pre>{JSON.stringify(row.parsedFields, null, 2)}</pre><p>Confidence: {row.confidence}%</p></div>) : <p className="empty-state">No candidate rows created.</p>}</section><section><h4>5. Validation failures</h4>{item.validationFailures.length ? <ul className="debug-list">{item.validationFailures.map((failure, index) => <li key={`${failure}-${index}`}>Rejected: {failure}</li>)}</ul> : <p className="empty-state">No validation failures recorded.</p>}</section><section><h4>6. Final camp objects</h4><pre>{JSON.stringify(item.finalCampObjects, null, 2)}</pre></section></article>)}</details>;
 }
 
 function ReviewTable<T extends DiscoveryProvider | DiscoveryCamp>({ title, fields, rows, update, remove }: { title: string; fields: Array<keyof T>; rows: T[]; update: (index: number, field: keyof T, value: string | boolean | number) => void; remove: (index: number) => void }) {

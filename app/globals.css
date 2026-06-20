@@ -922,3 +922,80 @@ button:disabled:hover {
     grid-template-columns: 1fr;
   }
 }
+
+.developer-debug summary {
+  cursor: pointer;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.debug-page {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+.debug-page h3,
+.debug-page h4 {
+  margin-bottom: 0.5rem;
+}
+
+.developer-debug pre {
+  background: #0f172a;
+  border-radius: 12px;
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  margin: 0.4rem 0 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.debug-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.debug-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.debug-card {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 1rem;
+}
+
+@media (max-width: 700px) {
+  .debug-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.debug-fields {
+  display: grid;
+  gap: 0.35rem 0.75rem;
+  grid-template-columns: max-content 1fr;
+  margin: 0;
+}
+
+.debug-fields dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.debug-fields dd {
+  margin: 0;
+}
