@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const MAX_PAGES = 10;
-const likelyCampLink = /\b(camps?|summer|easter|halloween|holiday|programme|program|book(?:ing)?|enrol|enroll|schedule|class|profile\.php|selected_schedule)\b/i;
+const likelyCampLink = /\b(camps?|summer|easter|halloween|holiday|programme|program|book(?:ing)?|enrol|enroll|schedule|class)\b|profile\.php|selected_schedule|[?&]id=/i;
 // TODO: Add Google Maps/search discovery, franchise-wide crawling, and LLM extraction in later phases.
 const blockedLink = /\b(social|facebook|instagram|twitter|x\.com|linkedin|youtube|mailto:|tel:|maps?\.|google\.com\/maps|privacy|terms|cookie|login|account|cart|checkout|payment)\b/i;
 
@@ -48,10 +48,25 @@ function providerToken(hostname: string) {
   return hostname.replace(/^www\./, "").split(".")[0].replace(/\d+$/g, "").toLowerCase();
 }
 
+function isSameOrSubdomain(hostname: string, domain: string) {
+  const normalizedHost = hostname.replace(/^www\./, "").toLowerCase();
+  const normalizedDomain = domain.replace(/^www\./, "").toLowerCase();
+  return normalizedHost === normalizedDomain || normalizedHost.endsWith(`.${normalizedDomain}`);
+}
+
+function isBricks4KidzBookingFlow(source: URL, target: URL) {
+  return isSameOrSubdomain(source.hostname, "bricks4kidz.ie") && isSameOrSubdomain(target.hostname, "bricks4kidznow.com");
+}
+
 function isRelatedDomain(source: URL, target: URL) {
   if (source.hostname === target.hostname || rootDomain(source.hostname) === rootDomain(target.hostname)) return true;
+  if (isBricks4KidzBookingFlow(source, target)) return true;
   const sourceToken = providerToken(source.hostname);
   return sourceToken.length >= 4 && target.hostname.toLowerCase().includes(sourceToken);
+}
+
+function hasBookingPathOrQuery(url: URL) {
+  return likelyCampLink.test(`${url.pathname}${url.search}`);
 }
 
 function linkDecision(source: URL, link: string) {
@@ -60,7 +75,7 @@ function linkDecision(source: URL, link: string) {
   try { parsed = new URL(link); } catch { return "Invalid URL"; }
   if (!["http:", "https:"].includes(parsed.protocol)) return "Unsupported protocol";
   if (!isRelatedDomain(source, parsed)) return "External domain is not clearly related to provider";
-  if (!likelyCampLink.test(link)) return "No camp/booking keyword";
+  if (!hasBookingPathOrQuery(parsed) && !likelyCampLink.test(link)) return "No camp/booking keyword";
   return "crawl";
 }
 
