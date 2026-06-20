@@ -15,6 +15,7 @@ const holidays: HolidayType[] = ["Summer", "Easter", "Halloween", "February Midt
 const navigationReject = /^(our )?(programmes?|programming|school tours?|after school programmes?|classes|activities|parties|contact|about|home|book now|faq|faqs|gallery|locations?|prices?|timetable|schedule|camp dates?|camps?|summer|easter|halloween)(?:\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4})?$/i;
 const campSignal = /\b(summer|easter|halloween|midterm|christmas)\s+(camp|course|workshop)|\bcamp\s+(dates?|weeks?|booking|price|cost)|\b(?:ages?|aged)\s*\d|€\s?\d|book\s+(now|online)|\b\d{1,2}\s*(?:-|to)\s*\d{1,2}\s*(?:years?|yrs?)\b/i;
 const eircodeRegex = /\b(?:[AC-FHKNPRTV-Y]\d{2}|D6W)\s?[0-9AC-FHKNPRTV-Y]{4}\b/i;
+const candidateAgeWindow = 8;
 
 const monthNumbers: Record<string, string> = { jan: "01", january: "01", feb: "02", february: "02", mar: "03", march: "03", apr: "04", april: "04", may: "05", jun: "06", june: "06", jul: "07", july: "07", aug: "08", august: "08", sep: "09", sept: "09", september: "09", oct: "10", october: "10", nov: "11", november: "11", dec: "12", december: "12" };
 const southDublinTowns = ["Knocklyon", "Cabinteely", "Dundrum", "Rathfarnham", "Stillorgan", "Sandyford", "Blackrock", "Monkstown", "Dún Laoghaire", "Dun Laoghaire", "Dalkey", "Killiney", "Foxrock", "Ballinteer", "Terenure", "Templeogue", "Tallaght", "Lucan", "Clondalkin"];
@@ -46,6 +47,7 @@ function to24Hour(hourValue: string, minuteValue: string | undefined, marker: st
   let hour = Number(hourValue);
   const minute = Number(minuteValue ?? 0);
   const effectiveMarker = (marker || "").toLowerCase();
+  if (hour > 12) return `${pad2(hour)}:${pad2(minute)}`;
   if (effectiveMarker === "pm" && hour < 12) hour += 12;
   if (effectiveMarker === "am" && hour === 12) hour = 0;
   return `${pad2(hour)}:${pad2(minute)}`;
@@ -67,6 +69,21 @@ function inferCounty(text: string, fallback: string) {
   if (fallback) return fallback;
   return /\bDublin\b|\bD\d{1,2}\b|south county dublin/i.test(text) || inferTown(text) ? "Dublin" : "";
 }
+function candidateTextWindow(lines: string[], index: number, radius = candidateAgeWindow) {
+  return lines.slice(Math.max(0, index - radius), Math.min(lines.length, index + radius + 1)).join(" · ");
+}
+function nearestAgeRange(lines: string[], index: number, radius = candidateAgeWindow) {
+  const ownLine = parseAgeRange(lines[index]);
+  if (ownLine.ageMin) return ownLine;
+  for (let distance = 1; distance <= radius; distance += 1) {
+    const after = lines[index + distance] ? parseAgeRange(lines[index + distance]) : null;
+    if (after?.ageMin) return after;
+    const before = lines[index - distance] ? parseAgeRange(lines[index - distance]) : null;
+    if (before?.ageMin) return before;
+  }
+  return parseAgeRange(candidateTextWindow(lines, index, radius));
+}
+
 function extractLocationText(text: string, dateRange: BricksDateRange) {
   const withoutDate = text.replace(dateRange.label, " ").replace(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/i, " ").replace(/\b(?:suitable\s+for\s+)?ages?\s*:?\s*\d{1,2}\s*(?:-|–|to)\s*\d{1,2}(?:\s*(?:years?|yrs?))?\b|\b\d{1,2}\s*(?:-|–|to)\s*\d{1,2}\s*(?:years?|yrs?)\b/i, " ").replace(/€?\s*0\.00\b/i, " ").trim();
   return withoutDate.replace(/\s{2,}/g, " ").replace(/^[·|,\s-]+|[·|,\s-]+$/g, "");
@@ -84,7 +101,7 @@ function extractBricksBookingCamps(rawText: string, input: DiscoveryInput, provi
     const context = lines.slice(Math.max(0, index - 1), Math.min(lines.length, index + 4)).join(" · ");
     const dateRange = rowHasDate;
     const timeRange = parseTimeRange(lines[index]);
-    const ageRange = parseAgeRange(context);
+    const ageRange = nearestAgeRange(lines, index);
     if (!dateRange || !timeRange.startTime || !ageRange.ageMin) continue;
     const locationText = extractLocationText(lines[index], dateRange) || extractLocationText(context, dateRange);
     const title = findCampTitle(lines, index, providerName);
@@ -108,14 +125,15 @@ function buildBricksDebugCandidates(rawText: string, input: DiscoveryInput, prov
     const dateRange = parseDateRange(lines[index]);
     if (!dateRange) continue;
     const context = lines.slice(Math.max(0, index - 1), Math.min(lines.length, index + 4)).join(" · ");
+    const candidateSlice = candidateTextWindow(lines, index);
     const timeRange = parseTimeRange(lines[index]);
-    const ageRange = parseAgeRange(context);
+    const ageRange = nearestAgeRange(lines, index);
     const locationText = extractLocationText(lines[index], dateRange) || extractLocationText(context, dateRange);
     const title = findCampTitle(lines, index, providerName);
     const town = inferTown(locationText);
     const county = inferCounty(`${locationText} ${input.sourceUrl} ${input.county ?? ""} ${input.notes ?? ""}`, fallbackCounty);
     const fieldConfidence = { camp_name: 90, county: county ? 85 : 0, town: town ? 82 : 0, address: locationText ? 60 : 0, eircode: 0, activity_type: 95, holiday_type: 88, age: ageRange.ageMin ? 95 : 0, start_date: dateRange.startDate ? 95 : 0, price: 0, booking_url: input.sourceUrl ? 80 : 0 };
-    rows.push({ extractedText: context, parsedFields: { title, start_date: dateRange.startDate, end_date: dateRange.endDate, matched_time: timeRange.label, start_time: timeRange.startTime, end_time: timeRange.endTime, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: locationText, town, county, source_method: sourceMethod }, confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 2, start_date: 2, price: 1, booking_url: 1, activity_type: 1 }), validationFailures: [dateRange.startDate ? "" : "No valid start date", timeRange.startTime ? "" : "Missing time range", ageRange.ageMin ? "" : "Missing age range", locationText ? "" : "Missing location", title ? "" : "No camp title"].filter(Boolean) });
+    rows.push({ extractedText: candidateSlice, parsedFields: { title, start_date: dateRange.startDate, end_date: dateRange.endDate, matched_time: timeRange.label, start_time: timeRange.startTime, end_time: timeRange.endTime, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: locationText, town, county, source_method: sourceMethod }, confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 2, start_date: 2, price: 1, booking_url: 1, activity_type: 1 }), validationFailures: [dateRange.startDate ? "" : "No valid start date", timeRange.startTime ? "" : "Missing time range", ageRange.ageMin ? "" : "Missing age range", locationText ? "" : "Missing location", title ? "" : "No camp title"].filter(Boolean) });
   }
   return rows;
 }
