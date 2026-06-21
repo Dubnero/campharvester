@@ -6,7 +6,7 @@ const likelyCampLink = /\b(camps?|summer|easter|halloween|holiday|programme|prog
 // TODO: Add Google Maps/search discovery, franchise-wide crawling, and LLM extraction in later phases.
 const blockedLink = /\b(social|facebook|instagram|twitter|x\.com|linkedin|youtube|mailto:|tel:|maps?\.|google\.com\/maps|privacy|terms|cookie|login|account|cart|checkout|payment)\b/i;
 
-type CrawlPage = { url: string; text: string; readableTextLength: number; candidateCount: number; dynamicWarning: boolean; status: "analysed" | "failed"; failureReason?: string; sourceMethod: "crawler" };
+type CrawlPage = { url: string; text: string; readableTextLength: number; candidateCount: number; dynamicWarning: boolean; status: "analysed" | "failed"; failureReason?: string; sourceMethod: "crawler"; extractionBlocked?: boolean };
 type SkippedUrl = { url: string; reason: string };
 
 function htmlToText(html: string) {
@@ -125,8 +125,8 @@ export async function POST(request: Request) {
     const source = new URL(url);
     if (!["http:", "https:"].includes(source.protocol)) throw new Error("Only http and https URLs are supported.");
 
-    const starcampListingMode = isStarcampListingPage(source);
-    const maxPages = starcampListingMode ? MAX_STARCAMP_PAGES : MAX_PAGES;
+    let starcampListingMode = false;
+    let maxPages = MAX_PAGES;
     const queue = [source.toString()];
     const queued = new Set(queue);
     const crawled = new Set<string>();
@@ -141,8 +141,12 @@ export async function POST(request: Request) {
       try {
         const { html, text } = await fetchPage(currentUrl);
         const currentParsed = new URL(currentUrl);
+        if (isStarcampListingPage(currentParsed)) {
+          starcampListingMode = true;
+          maxPages = MAX_STARCAMP_PAGES;
+        }
         const productPage = isStarcampProductPage(currentParsed);
-        pages.push({ url: currentUrl, text: starcampListingMode && !productPage ? "" : text, readableTextLength: starcampListingMode && !productPage ? 0 : text.length, candidateCount: starcampListingMode && !productPage ? 0 : campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text), status: "analysed", sourceMethod: "crawler" });
+        pages.push({ url: currentUrl, text, readableTextLength: text.length, candidateCount: starcampListingMode && !productPage ? 0 : campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text), status: "analysed", sourceMethod: "crawler", extractionBlocked: starcampListingMode && !productPage });
         for (const link of extractLinks(html, currentUrl)) {
           discovered.add(link);
           if (queued.has(link) || crawled.has(link)) continue;
