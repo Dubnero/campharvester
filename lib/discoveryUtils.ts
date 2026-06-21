@@ -225,6 +225,71 @@ function extractBricksBookingCamps(rawText: string, input: DiscoveryInput, provi
   return camps;
 }
 
+
+function isStarcampSource(input: DiscoveryInput, rawText: string, providerName: string) {
+  return /starcamp\.ie/i.test(input.sourceUrl) || /\bstarcamp\b/i.test(`${providerName} ${rawText}`);
+}
+function starcampTownFromUrl(sourceUrl: string) {
+  try {
+    const slug = new URL(sourceUrl).pathname.split("/").filter(Boolean).pop() ?? "";
+    return slug.replace(/-(?:summer|easter|halloween|midterm|christmas)?-?camp$/i, "").split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+  } catch { return ""; }
+}
+function extractStarcampDateRanges(rawText: string) {
+  const compact = rawText.replace(/\r/g, "\n").replace(/\n+/g, " · ");
+  const ranges: BricksDateRange[] = [];
+  const seen = new Set<string>();
+  const regex = /\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:-|–|to)\s*(\d{1,2})(?:st|nd|rd|th)?\s+(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)(?:\s+(20\d{2}))?\b/gi;
+  let match: RegExpExecArray | null;
+  const fallbackYear = inferYear(rawText);
+  while ((match = regex.exec(compact)) !== null) {
+    const range = { label: match[0], startDate: isoDate(match[1], match[3], match[4] || fallbackYear), endDate: isoDate(match[2], match[3], match[4] || fallbackYear), priority: 4 };
+    const key = `${range.startDate}:${range.endDate}`;
+    if (!seen.has(key)) { seen.add(key); ranges.push(range); }
+  }
+  return ranges;
+}
+function extractStarcampLocation(rawText: string, fallbackTown: string) {
+  const lines = rawText.replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
+  const titleLine = lines.find((line) => /\b(?:summer|easter)\s+camp\b/i.test(line) && !navigationReject.test(line)) ?? "";
+  const venueLabel = lines.find((line) => /(?:venue|location|camp location|address)\s*:/i.test(line))?.replace(/.*?(?:venue|location|camp location|address)\s*:\s*/i, "") ?? "";
+  const county = findKnown(rawText, counties);
+  const town = findKnown(rawText, [...southDublinTowns, fallbackTown].filter(Boolean)) || fallbackTown;
+  const address = venueLabel || titleLine.replace(/\b(?:summer|easter)\s+camp\b.*$/i, "").replace(/^Starcamp\s*/i, "").trim() || town;
+  return { town, county, address, titleLine };
+}
+function extractStarcampCamps(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) {
+  const providerName = "Starcamp";
+  const providerId = input.providerId?.trim() || "starcamp";
+  const fallbackTown = starcampTownFromUrl(input.sourceUrl);
+  const { town, county, address, titleLine } = extractStarcampLocation(rawText, fallbackTown);
+  const dateRanges = extractStarcampDateRanges(rawText);
+  const price = extractPrice(rawText);
+  const ageRange = parseAgeRange(rawText);
+  const bookingUrl = input.sourceUrl;
+  const holidayFallback = input.holidayType?.trim() || (/easter/i.test(`${input.sourceUrl} ${rawText}`) ? "Easter" : /summer/i.test(`${input.sourceUrl} ${rawText}`) ? "Summer" : "");
+  const campNameBase = titleLine || `${town || fallbackTown} ${holidayFallback || ""} Camp`.replace(/\s+/g, " ").trim();
+  const rejectionBase = [campNameBase ? "" : "Missing camp_name", bookingUrl ? "" : "Missing booking_url", price ? "" : "Missing price", town || county ? "" : "Missing town or county"].filter(Boolean);
+  if (rejectionBase.length || dateRanges.length === 0) return [];
+  return dateRanges.map((dateRange) => {
+    const holidayType = inferHolidayFromDate(dateRange.startDate, holidayFallback) as HolidayType;
+    const fieldConfidence = { camp_name: 95, county: county ? 85 : 0, town: town ? 85 : 0, address: address ? 80 : 0, eircode: validEircode(rawText) ? 100 : 0, activity_type: 90, holiday_type: 95, age: ageRange.ageMin ? 80 : 0, start_date: 100, price: 100, booking_url: 100 };
+    const confidence = confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 1, start_date: 3, price: 2, booking_url: 2, activity_type: 1 });
+    return { camp_id: slugify(`${providerId}-${address || town}-${holidayType}-${dateRange.startDate}`), provider_id: providerId, camp_name: campNameBase.slice(0, 140), county, town, address, eircode: validEircode(rawText), activity_type: input.activityType?.trim() || "Performing Arts", holiday_type: holidayType, age_min: ageRange.ageMin, age_max: ageRange.ageMax, start_date: dateRange.startDate, end_date: dateRange.endDate, start_time: "", end_time: "", half_day_or_full_day: "Unknown", price, booking_url: bookingUrl, status: "draft", verified: false, featured: false, source_url: input.sourceUrl, last_checked: today(), selected: true, needs_review: true, duplicateWarnings: [], confidence, fieldConfidence, extractionWarnings: [], source_method: sourceMethod } satisfies DiscoveryCamp;
+  });
+}
+function buildStarcampDebugCandidates(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) {
+  const fallbackTown = starcampTownFromUrl(input.sourceUrl);
+  const location = extractStarcampLocation(rawText, fallbackTown);
+  const price = extractPrice(rawText);
+  const ageRange = parseAgeRange(rawText);
+  const dateRanges = extractStarcampDateRanges(rawText);
+  return (dateRanges.length ? dateRanges : [{ label: "", startDate: "", endDate: "", priority: 0 }]).map((dateRange) => {
+    const failures = [location.titleLine || location.town ? "" : "Missing camp_name", input.sourceUrl ? "" : "Missing booking_url", price ? "" : "Missing price", dateRange.startDate ? "" : "Missing start_date", dateRange.endDate ? "" : "Missing end_date", location.town || location.county ? "" : "Missing town or county"].filter(Boolean);
+    return { extractedText: `${location.titleLine || location.address} ${dateRange.label}`.trim(), parsedFields: { provider: "Starcamp", title: location.titleLine, matched_date: dateRange.label, start_date: dateRange.startDate, end_date: dateRange.endDate, price, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: location.address, town: location.town, county: location.county, booking_url: input.sourceUrl, source_method: sourceMethod, rejected_reason: failures.join(", ") }, confidence: failures.length ? 0 : 95, validationFailures: failures } satisfies ExtractionDebugCandidate;
+  });
+}
+
 function allMatches(text: string, regex: RegExp) { return Array.from(text.matchAll(regex)).map((match) => match[0]); }
 function uniqueDebugMatches(matches: ExtractionDebugMatch[]) { const seen = new Set<string>(); return matches.filter((match) => { const key = `${match.type}:${match.value}`; if (!match.value || seen.has(key)) return false; seen.add(key); return true; }); }
 function buildBricksDebugCandidates(rawText: string, input: DiscoveryInput, providerName: string, fallbackCounty: string, sourceMethod: SourceMethod) {
@@ -268,12 +333,14 @@ export function buildExtractionDebug(input: DiscoveryInput, rawText: string, sou
     return { extractedText: context, parsedFields: { name, date, matched_time: time, start_time: timeRange.startTime, end_time: timeRange.endTime, price, matched_age: ageRange.label, age_min: ageMin, age_max: ageMax, activity_type: campActivity, booking_url: bookingUrl }, confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 2, start_date: 2, price: 1, booking_url: 1, activity_type: 1 }), validationFailures: [date ? "" : "Missing dates", price ? "" : "No price detected", bookingUrl ? "" : "Missing booking URL"].filter(Boolean) };
   });
   const isBricks = /bricks\s*4\s*kidz|profile\.php|selected_schedule|south county dublin/i.test(`${rawText} ${input.sourceUrl} ${providerName}`);
+  const isStarcamp = isStarcampSource(input, rawText, providerName);
   const bricksRows = isBricks ? buildBricksDebugCandidates(rawText, input, providerName, county, sourceMethod) : [];
+  const starcampRows = isStarcamp ? buildStarcampDebugCandidates(rawText, input, sourceMethod) : [];
   const records = extractDiscoveryRecords(input, rawText, sourceMethod);
-  const candidateRows = isBricks && bricksRows.length ? bricksRows : genericRows;
+  const candidateRows = isStarcamp && starcampRows.length ? starcampRows : isBricks && bricksRows.length ? bricksRows : genericRows;
   const regexMatches = uniqueDebugMatches([...(providerName ? [{ type: "Provider" as const, value: providerName }] : []), ...allMatches(rawText, /\b(?:\d{1,2})(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*(?:-|–|to)\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s+20\d{2})?|\b\d{1,2}(?:st|nd|rd|th)?\s*(?:-|–|to)\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s+20\d{2})?|\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*20\d{2})?\s*(?:-|–|to)\s*(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+)?\d{1,2}(?:st|nd|rd|th)?(?:,\s*20\d{2})?/gi).map((value) => ({ type: "Date" as const, value })), ...allMatches(rawText, /\b\d{1,2}:\d{2}\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}:\d{2}\s*(?:am|pm)?\b|\b\d{1,2}\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}\s*(?:am|pm)\b/gi).map((value) => ({ type: "Time" as const, value })), ...allMatches(rawText, /\b(?:suitable\s+for\s+)?ages?\s*:?\s*\d{1,2}\s*(?:-|–|to)\s*\d{1,2}(?:\s*(?:years?|yrs?))?\b|\b\d{1,2}\s*(?:-|–|to)\s*\d{1,2}\s*(?:years?|yrs?)\b/gi).map((value) => ({ type: "Age" as const, value })), ...allMatches(rawText, /€\s?\d+(?:\.\d{2})?/g).map((value) => ({ type: "Price" as const, value })), ...southDublinTowns.filter((town) => rawText.toLowerCase().includes(town.toLowerCase())).map((value) => ({ type: "Town" as const, value })), ...candidateRows.map((row) => String(row.parsedFields.location ?? "")).filter(Boolean).map((value) => ({ type: "Location" as const, value }))]);
   const count = (type: ExtractionDebugMatch["type"]) => regexMatches.filter((match) => match.type === type).length;
-  return { sourceUrl: input.sourceUrl, sourceMethod, rawTextPreview: rawText.slice(0, 5000), stages: [{ label: "Provider detected", count: providerName ? 1 : 0, passed: Boolean(providerName) }, { label: "Dates detected", count: count("Date"), passed: count("Date") > 0 }, { label: "Time ranges detected", count: count("Time"), passed: count("Time") > 0 }, { label: "Age ranges detected", count: count("Age"), passed: count("Age") > 0 }, { label: "Locations detected", count: count("Location"), passed: count("Location") > 0 }, { label: "Candidate rows created", count: candidateRows.length, passed: candidateRows.length > 0 }, { label: "Camps created", count: records.camps.length, passed: records.camps.length > 0 }], regexMatches, candidateRows, validationFailures: [...candidateRows.flatMap((row) => row.validationFailures), ...Array.from({ length: Math.max(0, candidateRows.filter((row) => row.validationFailures.length === 0).length - records.camps.length) }, () => "Duplicate")], finalCampObjects: records.camps };
+  return { sourceUrl: input.sourceUrl, sourceMethod, rawTextPreview: rawText.slice(0, 5000), stages: [{ label: "Provider detected", count: providerName ? 1 : 0, passed: Boolean(providerName) }, { label: "Dates detected", count: count("Date"), passed: count("Date") > 0 }, { label: "Time ranges detected", count: count("Time"), passed: count("Time") > 0 }, { label: "Age ranges detected", count: count("Age"), passed: count("Age") > 0 }, { label: "Locations detected", count: count("Location"), passed: count("Location") > 0 }, { label: "Candidate rows created", count: candidateRows.length, passed: candidateRows.length > 0 }, { label: "Multiple schedules detected", count: candidateRows.length > 1 ? candidateRows.length : 0, passed: candidateRows.length > 1 }, { label: "Camps created", count: records.camps.length, passed: records.camps.length > 0 }], regexMatches, candidateRows, validationFailures: [...candidateRows.flatMap((row) => row.validationFailures), ...Array.from({ length: Math.max(0, candidateRows.filter((row) => row.validationFailures.length === 0).length - records.camps.length) }, () => "Duplicate")], finalCampObjects: records.camps };
 }
 
 
@@ -283,7 +350,7 @@ function firstMatch(text: string, regex: RegExp) { return text.match(regex)?.[0]
 function firstUrl(text: string, regex: RegExp) { return text.match(regex)?.[0] ?? ""; }
 function findKnown(text: string, values: readonly string[]) { const lower = text.toLowerCase(); return values.find((value) => lower.includes(value.toLowerCase())) ?? ""; }
 function titleFromUrl(sourceUrl: string) { try { const url = new URL(sourceUrl); return url.hostname.replace(/^www\./, "").split(".")[0].replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); } catch { return ""; } }
-function inferProviderName(sourceUrl: string, text: string) { return /bricks\s*4\s*kidz|bricks4kidz|profile\.php|selected_schedule|ie1/i.test(`${sourceUrl} ${text}`) ? "Bricks4Kidz" : titleFromUrl(sourceUrl); }
+function inferProviderName(sourceUrl: string, text: string) { return /starcamp\.ie|\bstarcamp\b/i.test(`${sourceUrl} ${text}`) ? "Starcamp" : /bricks\s*4\s*kidz|bricks4kidz|profile\.php|selected_schedule|ie1/i.test(`${sourceUrl} ${text}`) ? "Bricks4Kidz" : titleFromUrl(sourceUrl); }
 function websiteFromUrl(sourceUrl: string) { try { const url = new URL(sourceUrl); return `${url.protocol}//${url.host}`; } catch { return sourceUrl; } }
 function validEmail(text: string) { return firstMatch(text, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); }
 function validPhone(text: string) { return firstMatch(text, /(?:\+353|0)\s?(?:1|2[1-9]|4[0-9]|5[0-9]|6[0-9]|7[14]|8[356789]|9[0-9])(?:[\s-]?\d){6,8}\b/); }
@@ -343,8 +410,9 @@ export function extractDiscoveryRecords(input: DiscoveryInput, rawText: string, 
     const extractionWarnings = [date ? "" : "Missing dates", price ? "" : "No price detected", bookingUrl ? "" : "Missing booking URL"].filter(Boolean);
     return { camp_id: slugify(`${providerId || "provider"}-${name}`) || `discovered-camp-${index + 1}`, provider_id: providerId, camp_name: name, county, town: "", address: "", eircode: globalEircode, activity_type: campActivity, holiday_type: findHoliday(`${name} ${context}`, input.holidayType?.trim()), age_min: ageMin, age_max: ageMax, start_date: date, end_date: "", start_time: time, end_time: "", half_day_or_full_day: /half\s?day/i.test(context) ? "Half day" : /full\s?day/i.test(context) ? "Full day" : "Unknown", price, booking_url: bookingUrl, status: "draft", verified: false, featured: false, source_url: input.sourceUrl, last_checked: today(), selected: confidence >= 60, needs_review: true, duplicateWarnings: [], confidence, fieldConfidence, extractionWarnings, source_method: sourceMethod };
   });
+  const starcampCamps = isStarcampSource(input, rawText, providerName) ? extractStarcampCamps(rawText, input, sourceMethod) : [];
   const bricksCamps = /bricks\s*4\s*kidz|profile\.php|selected_schedule|south county dublin/i.test(`${rawText} ${input.sourceUrl} ${providerName}`) ? extractBricksBookingCamps(rawText, input, providerName, providerId, county, sourceMethod) : [];
-  const camps = dedupeDiscoveryCamps(bricksCamps.length ? bricksCamps : genericCamps);
+  const camps = dedupeDiscoveryCamps(starcampCamps.length ? starcampCamps : bricksCamps.length ? bricksCamps : genericCamps);
   const manualEmptyWarning = sourceMethod === "manual_paste" && rawText.trim() && camps.length === 0 ? "Manual text was added, but no camps could be extracted. Check extraction patterns or paste a more complete section." : "";
   const warnings = [providerName ? "" : "Provider name could not be determined.", manualEmptyWarning || (camps.length ? "" : "No high-confidence camp offerings found; generic navigation items were ignored."), camps.length && camps.every((camp) => !camp.price) ? "No prices detected" : "", camps.some((camp) => !camp.start_date) ? `${camps.filter((camp) => !camp.start_date).length} camp(s) missing dates` : "", camps.some((camp) => !camp.booking_url) ? "Booking links not detected for all camps" : ""].filter(Boolean);
   return { providers: provider.provider_id || provider.provider_name ? [provider] : [], camps, warnings, textLength: text.length };
@@ -355,6 +423,7 @@ export function dedupeDiscoveryCamps(camps: DiscoveryCamp[]) {
   return camps.filter((camp) => {
     const keys = [
       camp.camp_id ? `id:${camp.camp_id}` : "",
+      camp.provider_id && camp.address && camp.town && camp.start_date ? `provider-venue:${camp.provider_id}:${camp.address.toLowerCase()}:${camp.town.toLowerCase()}:${camp.start_date}:${camp.holiday_type}` : "",
       camp.provider_id && camp.camp_name && camp.town && camp.start_date ? `provider:${camp.provider_id}:${camp.camp_name.toLowerCase()}:${camp.town.toLowerCase()}:${camp.start_date}` : "",
       camp.source_url && camp.camp_name ? `source:${camp.source_url}:${camp.camp_name.toLowerCase()}:${camp.town.toLowerCase()}:${camp.start_date}` : "",
     ].filter(Boolean);

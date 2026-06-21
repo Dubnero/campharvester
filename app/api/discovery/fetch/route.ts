@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 const MAX_PAGES = 10;
+const MAX_STARCAMP_PAGES = 120;
 const likelyCampLink = /\b(camps?|summer|easter|halloween|holiday|programme|program|book(?:ing)?|enrol|enroll|schedule|class)\b|profile\.php|selected_schedule|[?&]id=/i;
 // TODO: Add Google Maps/search discovery, franchise-wide crawling, and LLM extraction in later phases.
 const blockedLink = /\b(social|facebook|instagram|twitter|x\.com|linkedin|youtube|mailto:|tel:|maps?\.|google\.com\/maps|privacy|terms|cookie|login|account|cart|checkout|payment)\b/i;
@@ -65,6 +66,11 @@ function isRelatedDomain(source: URL, target: URL) {
   return sourceToken.length >= 4 && target.hostname.toLowerCase().includes(sourceToken);
 }
 
+function isStarcampUrl(url: URL) { return isSameOrSubdomain(url.hostname, "starcamp.ie"); }
+function isStarcampListingPage(url: URL) { return isStarcampUrl(url) && /^\/(summer|easter)-camps-list\/?$/i.test(url.pathname); }
+function isStarcampProductPage(url: URL) { return isStarcampUrl(url) && /^\/product\/[^/]*-camp\/?$/i.test(url.pathname); }
+function isStarcampPaginationPage(url: URL) { return isStarcampListingPage(url) || (isStarcampUrl(url) && /\/(?:[^/]+-camps-list\/page\/\d+|page\/\d+|product-category\/[^/]+\/page\/\d+)\/?$/i.test(url.pathname)); }
+
 function hasBookingPathOrQuery(url: URL) {
   return likelyCampLink.test(`${url.pathname}${url.search}`);
 }
@@ -74,6 +80,10 @@ function linkDecision(source: URL, link: string) {
   let parsed: URL;
   try { parsed = new URL(link); } catch { return "Invalid URL"; }
   if (!["http:", "https:"].includes(parsed.protocol)) return "Unsupported protocol";
+  if (isStarcampListingPage(source)) {
+    if (isStarcampProductPage(parsed) || isStarcampPaginationPage(parsed)) return "crawl";
+    return "Starcamp listing crawl only follows product and pagination URLs";
+  }
   if (!isRelatedDomain(source, parsed)) return "External domain is not clearly related to provider";
   if (!hasBookingPathOrQuery(parsed) && !likelyCampLink.test(link)) return "No camp/booking keyword";
   return "crawl";
@@ -115,6 +125,8 @@ export async function POST(request: Request) {
     const source = new URL(url);
     if (!["http:", "https:"].includes(source.protocol)) throw new Error("Only http and https URLs are supported.");
 
+    const starcampListingMode = isStarcampListingPage(source);
+    const maxPages = starcampListingMode ? MAX_STARCAMP_PAGES : MAX_PAGES;
     const queue = [source.toString()];
     const queued = new Set(queue);
     const crawled = new Set<string>();
@@ -122,13 +134,15 @@ export async function POST(request: Request) {
     const skipped = new Map<string, string>();
     const pages: CrawlPage[] = [];
 
-    while (queue.length && pages.length < MAX_PAGES) {
+    while (queue.length && pages.length < maxPages) {
       const currentUrl = queue.shift() as string;
       if (crawled.has(currentUrl)) continue;
       crawled.add(currentUrl);
       try {
         const { html, text } = await fetchPage(currentUrl);
-        pages.push({ url: currentUrl, text, readableTextLength: text.length, candidateCount: campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text), status: "analysed", sourceMethod: "crawler" });
+        const currentParsed = new URL(currentUrl);
+        const productPage = isStarcampProductPage(currentParsed);
+        pages.push({ url: currentUrl, text: starcampListingMode && !productPage ? "" : text, readableTextLength: starcampListingMode && !productPage ? 0 : text.length, candidateCount: starcampListingMode && !productPage ? 0 : campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text), status: "analysed", sourceMethod: "crawler" });
         for (const link of extractLinks(html, currentUrl)) {
           discovered.add(link);
           if (queued.has(link) || crawled.has(link)) continue;
@@ -143,7 +157,7 @@ export async function POST(request: Request) {
       }
     }
 
-    for (const pending of queue) skipped.set(pending, `Safe crawl limit reached (${MAX_PAGES} pages).`);
+    for (const pending of queue) skipped.set(pending, `Safe crawl limit reached (${maxPages} pages).`);
 
     const text = pages.map((page) => `\n\nSource URL: ${page.url}\n${page.text}`).join("\n").trim();
     return NextResponse.json({
@@ -155,8 +169,15 @@ export async function POST(request: Request) {
         discoveredUrls: Array.from(discovered),
         crawledUrls: pages.filter((page) => page.status === "analysed").map((page) => page.url),
         skippedUrls: Array.from(skipped.entries()).map(([skippedUrl, reason]) => ({ url: skippedUrl, reason } satisfies SkippedUrl)),
+        starcamp: starcampListingMode ? {
+          listingPagesCrawled: pages.filter((page) => isStarcampPaginationPage(new URL(page.url)) && page.status === "analysed").length,
+          paginationPagesDiscovered: Array.from(discovered).filter((item) => isStarcampPaginationPage(new URL(item))).length,
+          productUrlsDiscovered: Array.from(discovered).filter((item) => isStarcampProductPage(new URL(item))).length,
+          productUrlsCrawled: pages.filter((page) => isStarcampProductPage(new URL(page.url)) && page.status === "analysed").length,
+          productUrlsSkipped: Array.from(skipped.keys()).filter((item) => isStarcampProductPage(new URL(item))).length,
+        } : undefined,
       },
-      warnings: pages.some((page) => page.dynamicWarning) ? ["This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed."] : [],
+      warnings: [pages.some((page) => page.dynamicWarning) ? "This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed." : "", starcampListingMode && queue.length ? `Starcamp crawl limit warning: ${pages.filter((page) => isStarcampPaginationPage(new URL(page.url))).length} listing page(s), ${Array.from(discovered).filter((item) => isStarcampProductPage(new URL(item))).length} product(s) discovered, ${pages.filter((page) => isStarcampProductPage(new URL(page.url)) && page.status === "analysed").length} product(s) crawled, ${queue.filter((item) => isStarcampProductPage(new URL(item))).length} product(s) skipped because of crawl limits.` : ""].filter(Boolean),
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to fetch URL." }, { status: 502 });
