@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const MAX_PAGES = 10;
-const MAX_STARCAMP_PAGES = 120;
+const MAX_STARCAMP_PAGES = 260;
 const likelyCampLink = /\b(camps?|summer|easter|halloween|holiday|programme|program|book(?:ing)?|enrol|enroll|schedule|class)\b|profile\.php|selected_schedule|[?&]id=/i;
 // TODO: Add Google Maps/search discovery, franchise-wide crawling, and LLM extraction in later phases.
 const blockedLink = /\b(social|facebook|instagram|twitter|x\.com|linkedin|youtube|mailto:|tel:|maps?\.|google\.com\/maps|privacy|terms|cookie|login|account|cart|checkout|payment)\b/i;
@@ -68,8 +68,8 @@ function isRelatedDomain(source: URL, target: URL) {
 
 function isStarcampUrl(url: URL) { return isSameOrSubdomain(url.hostname, "starcamp.ie"); }
 function isStarcampListingPage(url: URL) { return isStarcampUrl(url) && /^\/(summer|easter)-camps-list\/?$/i.test(url.pathname); }
-function isStarcampProductPage(url: URL) { return isStarcampUrl(url) && /^\/product\/[^/]*-camp\/?$/i.test(url.pathname); }
-function isStarcampPaginationPage(url: URL) { return isStarcampListingPage(url) || (isStarcampUrl(url) && /\/(?:[^/]+-camps-list\/page\/\d+|page\/\d+|product-category\/[^/]+\/page\/\d+)\/?$/i.test(url.pathname)); }
+function isStarcampProductPage(url: URL) { return isStarcampUrl(url) && /^\/product\/[^/]*camp[^/]*\/?$/i.test(url.pathname); }
+function isStarcampPaginationPage(url: URL) { return isStarcampListingPage(url) || (isStarcampUrl(url) && /\/(?:[^/]+-camps-list\/page\/\d+|page\/\d+)\/?$/i.test(url.pathname)); }
 
 function hasBookingPathOrQuery(url: URL) {
   return likelyCampLink.test(`${url.pathname}${url.search}`);
@@ -181,7 +181,7 @@ export async function POST(request: Request) {
           productUrlsSkipped: Array.from(skipped.keys()).filter((item) => isStarcampProductPage(new URL(item))).length,
         } : undefined,
       },
-      warnings: [pages.some((page) => page.dynamicWarning) ? "This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed." : "", starcampListingMode && queue.length ? `Starcamp crawl limit warning: ${pages.filter((page) => isStarcampPaginationPage(new URL(page.url))).length} listing page(s), ${Array.from(discovered).filter((item) => isStarcampProductPage(new URL(item))).length} product(s) discovered, ${pages.filter((page) => isStarcampProductPage(new URL(page.url)) && page.status === "analysed").length} product(s) crawled, ${queue.filter((item) => isStarcampProductPage(new URL(item))).length} product(s) skipped because of crawl limits.` : ""].filter(Boolean),
+      warnings: [pages.some((page) => page.dynamicWarning) ? "This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed." : "", starcampListingMode && queue.length ? `Starcamp crawl limit warning: ${pages.filter((page) => isStarcampPaginationPage(new URL(page.url))).length} listing page(s), ${Array.from(discovered).filter((item) => isStarcampProductPage(new URL(item))).length} product(s) discovered, ${pages.filter((page) => isStarcampProductPage(new URL(page.url)) && page.status === "analysed").length} product(s) crawled, ${queue.filter((item) => isStarcampProductPage(new URL(item))).length} product(s) skipped because of crawl limits: ${queue.filter((item) => isStarcampProductPage(new URL(item))).join(", ")}` : ""].filter(Boolean),
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to fetch URL." }, { status: 502 });
