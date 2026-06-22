@@ -7,9 +7,12 @@ import { DiscoveryCamp, DiscoveryPageAnalysis, DiscoveryProvider, ExtractionPipe
 import type { Camp, Provider } from "@/lib/types";
 
 type FormState = { sourceUrl: string; providerId: string; providerName: string; county: string; activityType: string; holidayType: string; notes: string };
-type AnalysisLog = { sourceUrl: string; discoveredUrls: string[]; crawledUrls: string[]; skippedUrls: Array<{ url: string; reason: string }> };
+type AnalysisLog = { sourceUrl: string; discoveredUrls: string[]; crawledUrls: string[]; skippedUrls: Array<{ url: string; reason: string }>; starcamp?: { listingPagesCrawled: number; paginationPagesDiscovered: number; productUrlsDiscovered: number; productUrlsCrawled: number; productUrlsSkipped: number } };
 type ManualPage = { url: string; text: string };
+type DebugCounts = { productPagesCrawled: number; rawCampRecordsExtracted: number; uniqueCampSchedulesAfterDedupe: number; duplicateCampRecordsRemoved: number };
+type DebugExportPayload = { sourceUrl: string; generatedAt: string; crawlMetrics: AnalysisLog | null; urlStatus: DiscoveryPageAnalysis[]; pagesCrawled: string[]; debugCounts: DebugCounts; productUrls: { discovered: string[]; crawled: string[]; skipped: Array<{ url: string; reason: string }>; skipped_product_urls_due_to_limit: string[] }; debugItems: ExtractionPipelineDebug[] };
 const blankForm: FormState = { sourceUrl: "", providerId: "", providerName: "", county: "", activityType: "", holidayType: "", notes: "" };
+const blankDebugCounts: DebugCounts = { productPagesCrawled: 0, rawCampRecordsExtracted: 0, uniqueCampSchedulesAfterDedupe: 0, duplicateCampRecordsRemoved: 0 };
 const providerFields: Array<keyof DiscoveryProvider> = ["selected", "needs_review", "confidence", "provider_id", "provider_name", "website", "primary_email", "primary_phone", "primary_county", "activity_category", "provider_type", "status"];
 const campFields: Array<keyof DiscoveryCamp> = ["selected", "needs_review", "camp_id", "provider_id", "camp_name", "county", "town", "address", "eircode", "activity_type", "holiday_type", "age_min", "age_max", "start_date", "end_date", "start_time", "end_time", "half_day_or_full_day", "price", "booking_url", "status"];
 
@@ -32,6 +35,29 @@ function nextProviderId(existingProviders: Provider[], draftProviders: Discovery
 }
 
 function asImportCamp(camp: DiscoveryCamp): Camp { const { selected, needs_review, duplicateWarnings, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = camp; return { ...row, status: "draft", verified: false, featured: false }; }
+function downloadTextFile(filename: string, text: string, type = "text/plain;charset=utf-8") { const url = URL.createObjectURL(new Blob([text], { type })); const link = document.createElement("a"); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url); }
+function debugHostSlug(sourceUrl: string) { try { return new URL(sourceUrl).hostname.replace(/^www\./, "").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "source"; } catch { return "source"; } }
+function debugTimestamp(date = new Date()) { const pad = (value: number) => String(value).padStart(2, "0"); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`; }
+function debugFilename(sourceUrl: string, extension: "json" | "txt") { return `discovery-debug-${debugHostSlug(sourceUrl)}-${debugTimestamp()}.${extension}`; }
+function isProductCampUrl(url: string) { try { return /\/product\/[^/]*-camp\/?$/i.test(new URL(url).pathname); } catch { return false; } }
+function buildDebugExportPayload(sourceUrl: string, analysisLog: AnalysisLog | null, pages: DiscoveryPageAnalysis[], items: ExtractionPipelineDebug[], debugCounts: DebugCounts): DebugExportPayload {
+  const skipped = analysisLog?.skippedUrls ?? [];
+  return { sourceUrl, generatedAt: new Date().toISOString(), crawlMetrics: analysisLog, urlStatus: pages, pagesCrawled: pages.filter((page) => page.status === "analysed").map((page) => page.url), debugCounts, productUrls: { discovered: (analysisLog?.discoveredUrls ?? []).filter(isProductCampUrl), crawled: (analysisLog?.crawledUrls ?? []).filter(isProductCampUrl), skipped: skipped.filter((item) => isProductCampUrl(item.url)), skipped_product_urls_due_to_limit: skipped.filter((item) => isProductCampUrl(item.url) && /limit/i.test(item.reason)).map((item) => item.url) }, debugItems: items };
+}
+function formatDebugTxt(payload: DebugExportPayload) {
+  const lines: string[] = [];
+  lines.push("Discovery Assistant Developer Debug", `Generated: ${payload.generatedAt}`, `Source URL: ${payload.sourceUrl}`, "");
+  lines.push("Crawl metrics", JSON.stringify(payload.crawlMetrics, null, 2), "", "Debug counts", JSON.stringify(payload.debugCounts, null, 2), "");
+  lines.push("Product URLs", `Discovered (${payload.productUrls.discovered.length}):`, ...payload.productUrls.discovered.map((url) => `- ${url}`), `Fetched (${payload.productUrls.crawled.length}):`, ...payload.productUrls.crawled.map((url) => `- ${url}`), `Skipped (${payload.productUrls.skipped.length}):`, ...payload.productUrls.skipped.map((item) => `- ${item.url} (${item.reason})`), `Skipped due to limit (${payload.productUrls.skipped_product_urls_due_to_limit.length}):`, ...payload.productUrls.skipped_product_urls_due_to_limit.map((url) => `- ${url}`), "");
+  lines.push("URL status", ...payload.urlStatus.map((page) => `- ${page.status.toUpperCase()} ${page.url} | text=${page.readableTextLength} | candidates=${page.candidateCount} | ${page.extractionBlocked ? "extraction blocked" : "extractable"}${page.failureReason ? ` | ${page.failureReason}` : ""}`), "");
+  for (const item of payload.debugItems) {
+    lines.push("==============================", `Debug page: ${item.sourceUrl}`, `Method: ${item.sourceMethod}`, "1. Raw extracted text", item.rawTextPreview || "—", "", "2. Extraction pipeline", ...item.stages.map((stage) => `${stage.passed ? "✓" : "✗"} ${stage.label}: ${stage.count}`), "", "3. Regex matches");
+    lines.push(...(item.regexMatches.length ? item.regexMatches.map((match) => `- ${match.type}: ${match.value}`) : ["No regex matches found."]), "", "4. Candidate rows");
+    lines.push(...(item.candidateRows.length ? item.candidateRows.map((row, index) => `Candidate ${index + 1}\n${row.extractedText}\nParsed fields:\n${JSON.stringify(row.parsedFields, null, 2)}\nConfidence: ${row.confidence}%\nValidation failures: ${row.validationFailures.join(", ") || "none"}`) : ["No candidate rows created."]), "", "5. Validation failures");
+    lines.push(...(item.validationFailures.length ? item.validationFailures.map((failure) => `Rejected: ${failure}`) : ["No validation failures recorded."]), "", "6. Final camp objects", JSON.stringify(item.finalCampObjects, null, 2), "");
+  }
+  return lines.join("\n");
+}
 
 export function DiscoveryAssistant() {
   const [form, setForm] = useState<FormState>(blankForm);
@@ -48,15 +74,20 @@ export function DiscoveryAssistant() {
   const [fetchMessage, setFetchMessage] = useState("");
   const [importSummary, setImportSummary] = useState("");
   const [debugItems, setDebugItems] = useState<ExtractionPipelineDebug[]>([]);
+  const [debugCounts, setDebugCounts] = useState<DebugCounts>(blankDebugCounts);
   const selectedProviders = useMemo(() => providers.filter((provider) => provider.selected && !provider.duplicateWarnings.some((warning) => warning.startsWith("Existing provider found"))), [providers]);
   const selectedCamps = useMemo(() => camps.filter((camp) => camp.selected && camp.duplicateWarnings.length === 0), [camps]);
 
   function mergeExtraction(pages: DiscoveryPageAnalysis[], manual: Record<string, ManualPage>) {
     const inputs = [
+      ...pages.filter((page) => page.status === "analysed" && page.text && !page.extractionBlocked).map((page) => ({ url: page.url, text: page.text ?? "", method: page.sourceMethod })),
+      ...Object.values(manual).filter((page) => page.text.trim()).map((page) => ({ url: page.url, text: page.text, method: "manual_paste" as const })),
+    ];
+    const debugInputs = [
       ...pages.filter((page) => page.status === "analysed" && page.text).map((page) => ({ url: page.url, text: page.text ?? "", method: page.sourceMethod })),
       ...Object.values(manual).filter((page) => page.text.trim()).map((page) => ({ url: page.url, text: page.text, method: "manual_paste" as const })),
     ];
-    if (developerDebug) setDebugItems(inputs.map((input) => buildExtractionDebug({ sourceUrl: input.url, providerId: form.providerId, providerName: form.providerName, county: form.county, activityType: form.activityType, holidayType: form.holidayType, notes: form.notes }, input.text, input.method)));
+    if (developerDebug) setDebugItems(debugInputs.map((input) => buildExtractionDebug({ sourceUrl: input.url, providerId: form.providerId, providerName: form.providerName, county: form.county, activityType: form.activityType, holidayType: form.holidayType, notes: form.notes }, input.text, input.method)));
     const extracted = inputs.map((input) => extractDiscoveryRecords({ sourceUrl: input.url, providerId: form.providerId, providerName: form.providerName, county: form.county, activityType: form.activityType, holidayType: form.holidayType, notes: form.notes }, input.text, input.method));
     const providerMap = new Map<string, DiscoveryProvider>();
     for (const provider of extracted.flatMap((item) => item.providers)) {
@@ -64,11 +95,15 @@ export function DiscoveryAssistant() {
       const existing = providerMap.get(key);
       if (!existing || provider.confidence > existing.confidence || existing.source_method === "crawler") providerMap.set(key, existing ? { ...provider, duplicateWarnings: existing.duplicateWarnings } : provider);
     }
-    return { providers: Array.from(providerMap.values()), camps: dedupeDiscoveryCamps(extracted.flatMap((item) => item.camps)), warnings: Array.from(new Set(extracted.flatMap((item) => item.warnings))) };
+    const rawCamps = extracted.flatMap((item) => item.camps);
+    const mergedCamps = dedupeDiscoveryCamps(rawCamps);
+    const mergedWarnings = Array.from(new Set(extracted.flatMap((item) => item.warnings))).filter((warning) => !(mergedCamps.some((camp) => camp.provider_id === "starcamp" && camp.confidence >= 60) && warning === "No high-confidence camp offerings found; generic navigation items were ignored."));
+    return { providers: Array.from(providerMap.values()), camps: mergedCamps, warnings: mergedWarnings, rawCampCount: rawCamps.length };
   }
 
   async function applyExtraction(pages = pageAnalyses, manual = manualPages) {
     const extraction = mergeExtraction(pages, manual);
+    setDebugCounts({ productPagesCrawled: pages.filter((page) => page.status === "analysed" && isProductCampUrl(page.url)).length, rawCampRecordsExtracted: extraction.rawCampCount, uniqueCampSchedulesAfterDedupe: extraction.camps.length, duplicateCampRecordsRemoved: Math.max(0, extraction.rawCampCount - extraction.camps.length) });
     setWarnings((current) => Array.from(new Set([...current, ...extraction.warnings])));
     await detectDuplicates(extraction.providers, extraction.camps);
   }
@@ -82,6 +117,7 @@ export function DiscoveryAssistant() {
     setManualPages({});
     setActiveManualUrl("");
     setDebugItems([]);
+    setDebugCounts(blankDebugCounts);
     if (!manualMode) {
       const response = await fetch("/api/discovery/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: form.sourceUrl }) });
       const result = await response.json();
@@ -122,7 +158,7 @@ export function DiscoveryAssistant() {
       const originalProviderId = provider.provider_id;
       if (match) {
         providerIdMap.set(originalProviderId, match.provider_id);
-        return { ...provider, provider_id: match.provider_id, provider_name: match.provider_name, duplicateWarnings: [`Existing provider found: ${match.provider_id} / ${match.provider_name}`], selected: false };
+        return { ...provider, ...match, duplicateWarnings: [`Existing provider found: ${match.provider_id} / ${match.provider_name}`], selected: false, needs_review: provider.needs_review, confidence: provider.confidence, fieldConfidence: provider.fieldConfidence, extractionWarnings: provider.extractionWarnings, source_method: provider.source_method };
       }
       const assignedProviderId = /^P\d{4}$/.test(provider.provider_id) ? provider.provider_id : nextDraftProviderId;
       providerIdMap.set(originalProviderId, assignedProviderId);
@@ -143,14 +179,14 @@ export function DiscoveryAssistant() {
 
   function updateProvider(index: number, field: keyof DiscoveryProvider, value: string | boolean | number) { setProviders((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row)); }
   function updateCamp(index: number, field: keyof DiscoveryCamp, value: string | boolean | number) { setCamps((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row)); }
-  function downloadCsv() { const csv = recordsToCsv([...providers, ...camps]); const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); const link = document.createElement("a"); link.href = url; link.download = "discovery-assistant-export.csv"; link.click(); URL.revokeObjectURL(url); }
+  function downloadCsv() { downloadTextFile("discovery-assistant-export.csv", recordsToCsv([...providers, ...camps]), "text/csv;charset=utf-8"); }
   async function importSelected() { const [providerResult, campResult] = await Promise.all([selectedProviders.length ? upsertProviders(selectedProviders.map(asImportProvider)) : Promise.resolve({ data: [], error: null }), selectedCamps.length ? upsertCamps(selectedCamps.map(asImportCamp)) : Promise.resolve({ data: [], error: null })]); setImportSummary(`Imported ${providerResult.data.length} provider(s) and ${campResult.data.length} camp(s). ${[providerResult.error, campResult.error].filter(Boolean).join(" ")}`); }
 
   return <main className="app-shell"><header className="hero"><div><p className="eyebrow">Internal admin · draft discovery</p><h1>Discovery Assistant</h1><p>Analyse provider and camp pages, review deterministic draft records, then import selected unverified drafts.</p></div><div className="hero-actions"><Link className="button-link" href="/">Dashboard</Link></div></header>
     <section className="panel"><h2>Analyse source</h2><form className="edit-form" onSubmit={analyse}>{Object.keys(blankForm).map((key) => <label key={key}>{label(key)}<input value={form[key as keyof FormState]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} required={key === "sourceUrl"} /></label>)}<div className="form-actions wide-field"><button type="submit">Analyse page</button><button type="button" className="secondary" onClick={() => setManualMode(true)}>Paste page text instead</button></div></form>{manualMode ? <label className="wide-field">Paste page text instead<textarea rows={8} value={pageText} onChange={(event) => setPageText(event.target.value)} /></label> : null}<p>{fetchMessage}</p></section>
-    <section className="stats-grid"><article><span>Source URL analysed</span><strong>{form.sourceUrl || "—"}</strong></article><article><span>Text extracted length</span><strong>{pageText.length + Object.values(manualPages).reduce((sum, page) => sum + page.text.length, 0)}</strong></article><article><span>Possible providers</span><strong>{providers.length}</strong></article><article><span>Possible camps</span><strong>{camps.length}</strong></article></section>
+    <section className="stats-grid"><article><span>Source URL analysed</span><strong>{form.sourceUrl || "—"}</strong></article><article><span>Text extracted length</span><strong>{pageText.length + Object.values(manualPages).reduce((sum, page) => sum + page.text.length, 0)}</strong></article><article><span>Possible providers</span><strong>{providers.length}</strong></article><article><span>Unique camp schedules found</span><strong>{camps.length}</strong></article></section>
     <AnalysisLogPanel log={analysisLog} pages={pageAnalyses} activeManualUrl={activeManualUrl} manualDraft={manualDraft} onPaste={(url) => { setActiveManualUrl(url); setManualDraft(manualPages[url]?.text ?? ""); }} onDraftChange={setManualDraft} onSubmitManual={submitManualPage} />
-    {developerDebug ? <DeveloperExtractionDebug items={debugItems} /> : null}
+    {developerDebug ? <DeveloperExtractionDebug items={debugItems} sourceUrl={form.sourceUrl} analysisLog={analysisLog} pages={pageAnalyses} debugCounts={debugCounts} /> : null}
     <ExtractionSummary providers={providers} camps={camps} warnings={warnings} />
     <ReviewTable title="Providers" fields={providerFields} rows={providers} update={updateProvider} remove={(index) => setProviders((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
     <CampCards camps={camps} update={updateCamp} remove={(index) => setCamps((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
@@ -160,13 +196,14 @@ export function DiscoveryAssistant() {
 
 function AnalysisLogPanel({ log, pages, activeManualUrl, manualDraft, onPaste, onDraftChange, onSubmitManual }: { log: AnalysisLog | null; pages: DiscoveryPageAnalysis[]; activeManualUrl: string; manualDraft: string; onPaste: (url: string) => void; onDraftChange: (value: string) => void; onSubmitManual: () => void }) {
   if (!log && pages.length === 0) return null;
-  return <section className="panel"><h2>URL status</h2>{log ? <p className="empty-state">{log.discoveredUrls.length} discovered URL(s). Failed or blocked pages can be extended with manual paste.</p> : null}<div className="summary-list"><ul>{pages.map((page) => <li key={page.url}>{page.status === "failed" ? "✗" : "✓"} {page.url} {page.failureReason ? `(${page.failureReason})` : page.dynamicWarning ? "(possible JavaScript-rendered content)" : "analysed"} {page.status === "extracted" ? <><br />📋 Manual paste added<br />✓ Page extracted</> : null} {page.status !== "extracted" && (page.status === "failed" || page.dynamicWarning) ? <button type="button" className="secondary" onClick={() => onPaste(page.url)}>Paste page text</button> : null}</li>)}</ul></div>{activeManualUrl ? <div className="manual-paste-box"><h3>Paste page text</h3><p><strong>Source URL:</strong> {activeManualUrl}</p><textarea rows={12} value={manualDraft} onChange={(event) => onDraftChange(event.target.value)} /><div className="form-actions"><button type="button" onClick={onSubmitManual} disabled={!manualDraft.trim()}>Extract pasted page</button></div></div> : null}</section>;
+  return <section className="panel"><h2>URL status</h2>{log ? <p className="empty-state">{log.discoveredUrls.length} discovered URL(s). Failed or blocked pages can be extended with manual paste.</p> : null}{log?.starcamp ? <div className="warning-box compact"><strong>Starcamp listing-to-product crawl</strong><small>Listing pages crawled: {log.starcamp.listingPagesCrawled}</small><small>Pagination pages discovered: {log.starcamp.paginationPagesDiscovered}</small><small>Product URLs discovered: {log.starcamp.productUrlsDiscovered}</small><small>Product URLs crawled: {log.starcamp.productUrlsCrawled}</small><small>Product URLs skipped: {log.starcamp.productUrlsSkipped}</small></div> : null}<div className="summary-list"><ul>{pages.map((page) => <li key={page.url}>{page.status === "failed" ? "✗" : "✓"} {page.url} {page.failureReason ? `(${page.failureReason})` : page.extractionBlocked ? "analysed as Starcamp listing index" : page.dynamicWarning ? "(possible JavaScript-rendered content)" : "analysed"} {page.status === "extracted" ? <><br />📋 Manual paste added<br />✓ Page extracted</> : null} {page.status !== "extracted" && (page.status === "failed" || page.dynamicWarning) ? <button type="button" className="secondary" onClick={() => onPaste(page.url)}>Paste page text</button> : null}</li>)}</ul></div>{activeManualUrl ? <div className="manual-paste-box"><h3>Paste page text</h3><p><strong>Source URL:</strong> {activeManualUrl}</p><textarea rows={12} value={manualDraft} onChange={(event) => onDraftChange(event.target.value)} /><div className="form-actions"><button type="button" onClick={onSubmitManual} disabled={!manualDraft.trim()}>Extract pasted page</button></div></div> : null}</section>;
 }
 
 
-function DeveloperExtractionDebug({ items }: { items: ExtractionPipelineDebug[] }) {
+function DeveloperExtractionDebug({ items, sourceUrl, analysisLog, pages, debugCounts }: { items: ExtractionPipelineDebug[]; sourceUrl: string; analysisLog: AnalysisLog | null; pages: DiscoveryPageAnalysis[]; debugCounts: DebugCounts }) {
   if (!items.length) return null;
-  return <details className="panel developer-debug" open><summary>Developer Extraction Debug</summary>{items.map((item) => <article className="debug-page" key={`${item.sourceUrl}-${item.sourceMethod}`}><h3>{item.sourceUrl}</h3><p><span className="badge">{methodBadge(item.sourceMethod)}</span></p><section><h4>1. Raw extracted text</h4><pre>{item.rawTextPreview}</pre></section><section><h4>2. Extraction pipeline</h4><ul className="debug-list">{item.stages.map((stage) => <li key={stage.label}>{stage.passed ? "✓" : "✗"} {stage.label}: {stage.count}</li>)}</ul></section><section><h4>3. Regex matches</h4>{item.regexMatches.length ? <div className="debug-grid">{item.regexMatches.map((match, index) => <div key={`${match.type}-${match.value}-${index}`}><strong>{match.type}:</strong><pre>{match.value}</pre></div>)}</div> : <p className="empty-state">No regex matches found.</p>}</section><section><h4>4. Candidate rows</h4>{item.candidateRows.length ? item.candidateRows.map((row, index) => <div className="debug-card" key={`${row.extractedText}-${index}`}><strong>Candidate {index + 1}</strong><pre>{row.extractedText}</pre><strong>Parsed fields</strong><dl className="debug-fields"><dt>Matched age string</dt><dd>{String(row.parsedFields.matched_age || "—")}</dd><dt>Parsed age_min</dt><dd>{String(row.parsedFields.age_min || "—")}</dd><dt>Parsed age_max</dt><dd>{String(row.parsedFields.age_max || "—")}</dd><dt>Matched time string</dt><dd>{String(row.parsedFields.matched_time || "—")}</dd><dt>Parsed start_time</dt><dd>{String(row.parsedFields.start_time || "—")}</dd><dt>Parsed end_time</dt><dd>{String(row.parsedFields.end_time || "—")}</dd></dl><pre>{JSON.stringify(row.parsedFields, null, 2)}</pre><p>Confidence: {row.confidence}%</p></div>) : <p className="empty-state">No candidate rows created.</p>}</section><section><h4>5. Validation failures</h4>{item.validationFailures.length ? <ul className="debug-list">{item.validationFailures.map((failure, index) => <li key={`${failure}-${index}`}>Rejected: {failure}</li>)}</ul> : <p className="empty-state">No validation failures recorded.</p>}</section><section><h4>6. Final camp objects</h4><pre>{JSON.stringify(item.finalCampObjects, null, 2)}</pre></section></article>)}</details>;
+  const payload = buildDebugExportPayload(sourceUrl, analysisLog, pages, items, debugCounts);
+  return <details className="panel developer-debug" open><summary>Developer Extraction Debug</summary><div className="summary-pills"><span>Product pages crawled: {debugCounts.productPagesCrawled}</span><span>Raw camp records extracted: {debugCounts.rawCampRecordsExtracted}</span><span>Unique camp schedules after dedupe: {debugCounts.uniqueCampSchedulesAfterDedupe}</span><span>Duplicate camp records removed: {debugCounts.duplicateCampRecordsRemoved}</span></div><div className="form-actions"><button type="button" className="secondary" onClick={() => downloadTextFile(debugFilename(sourceUrl, "json"), JSON.stringify(payload, null, 2), "application/json;charset=utf-8")}>Download Debug JSON</button><button type="button" className="secondary" onClick={() => downloadTextFile(debugFilename(sourceUrl, "txt"), formatDebugTxt(payload))}>Download Debug TXT</button></div>{items.map((item) => <article className="debug-page" key={`${item.sourceUrl}-${item.sourceMethod}`}><h3>{item.sourceUrl}</h3><p><span className="badge">{methodBadge(item.sourceMethod)}</span></p><section><h4>1. Raw extracted text</h4><pre>{item.rawTextPreview}</pre></section><section><h4>2. Extraction pipeline</h4><ul className="debug-list">{item.stages.map((stage) => <li key={stage.label}>{stage.passed ? "✓" : "✗"} {stage.label}: {stage.count}</li>)}</ul></section><section><h4>3. Regex matches</h4>{item.regexMatches.length ? <div className="debug-grid">{item.regexMatches.map((match, index) => <div key={`${match.type}-${match.value}-${index}`}><strong>{match.type}:</strong><pre>{match.value}</pre></div>)}</div> : <p className="empty-state">No regex matches found.</p>}</section><section><h4>4. Candidate rows</h4>{item.candidateRows.length ? item.candidateRows.map((row, index) => <div className="debug-card" key={`${row.extractedText}-${index}`}><strong>Candidate {index + 1}</strong><pre>{row.extractedText}</pre><strong>Parsed fields</strong><dl className="debug-fields"><dt>Matched age string</dt><dd>{String(row.parsedFields.matched_age || "—")}</dd><dt>Parsed age_min</dt><dd>{String(row.parsedFields.age_min || "—")}</dd><dt>Parsed age_max</dt><dd>{String(row.parsedFields.age_max || "—")}</dd><dt>Matched time string</dt><dd>{String(row.parsedFields.matched_time || "—")}</dd><dt>Parsed start_time</dt><dd>{String(row.parsedFields.start_time || "—")}</dd><dt>Parsed end_time</dt><dd>{String(row.parsedFields.end_time || "—")}</dd><dt>Source product URL</dt><dd>{String(row.parsedFields.booking_url || item.sourceUrl || "—")}</dd><dt>Source text type</dt><dd>{String(row.parsedFields.booking_url) === item.sourceUrl && /\/product\//.test(item.sourceUrl) ? "product-page text" : /starcamp\.ie\/(summer|easter)-camps-list/i.test(item.sourceUrl) ? "listing text" : "page text"}</dd></dl><pre>{JSON.stringify(row.parsedFields, null, 2)}</pre><p>Confidence: {row.confidence}%</p></div>) : <p className="empty-state">No candidate rows created.</p>}</section><section><h4>5. Validation failures</h4>{item.validationFailures.length ? <ul className="debug-list">{item.validationFailures.map((failure, index) => <li key={`${failure}-${index}`}>Rejected: {failure}</li>)}</ul> : <p className="empty-state">No validation failures recorded.</p>}</section><section><h4>6. Final camp objects</h4><pre>{JSON.stringify(item.finalCampObjects, null, 2)}</pre></section></article>)}</details>;
 }
 
 function ReviewTable<T extends DiscoveryProvider | DiscoveryCamp>({ title, fields, rows, update, remove }: { title: string; fields: Array<keyof T>; rows: T[]; update: (index: number, field: keyof T, value: string | boolean | number) => void; remove: (index: number) => void }) {
@@ -181,7 +218,7 @@ function ExtractionSummary({ providers, camps, warnings }: { providers: Discover
   const providerConfidence = providers[0]?.confidence ?? 0;
   const duplicateProvider = providers.some((provider) => provider.duplicateWarnings.some((warning) => warning.startsWith("Existing provider found")));
   const summaryWarnings = [...warnings, duplicateProvider ? "Existing provider found" : "", ...camps.flatMap((camp) => camp.duplicateWarnings), ...camps.flatMap((camp) => camp.extractionWarnings.map((warning) => `${camp.camp_name}: ${warning}`))].filter(Boolean);
-  return <section className="panel extraction-summary"><h2>Extraction Summary</h2><div className="summary-pills"><span>Provider confidence <ConfidenceBadge score={providerConfidence} /></span><span>{camps.length} camp(s) found</span></div>{summaryWarnings.length ? <div className="warning-box"><strong>Warnings</strong><ul>{Array.from(new Set(summaryWarnings)).map((warning) => <li key={warning}>⚠ {warning}</li>)}</ul></div> : null}</section>;
+  return <section className="panel extraction-summary"><h2>Extraction Summary</h2><div className="summary-pills"><span>Provider confidence <ConfidenceBadge score={providerConfidence} /></span><span>{camps.length} unique camp schedules found</span></div>{summaryWarnings.length ? <div className="warning-box"><strong>Warnings</strong><ul>{Array.from(new Set(summaryWarnings)).map((warning) => <li key={warning}>⚠ {warning}</li>)}</ul></div> : null}</section>;
 }
 
 function CampCards({ camps, update, remove }: { camps: DiscoveryCamp[]; update: (index: number, field: keyof DiscoveryCamp, value: string | boolean | number) => void; remove: (index: number) => void }) {
