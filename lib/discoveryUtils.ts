@@ -256,6 +256,36 @@ function extractStarcampDateRanges(rawText: string) {
   }
   return ranges;
 }
+
+type StarcampPriceMatch = { price: string; source: "fixed_product_price" | "price_range_low" | "ignored_noise_price"; ignored: string[] };
+function formatEuroPrice(value: string | number) { return `€${Number(value).toFixed(2)}`; }
+function starcampPriceWindow(rawText: string) {
+  const lines = rawText.replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
+  const summaryStart = Math.max(0, lines.findIndex((line) => /\b(?:summer|easter)\s+camp\b/i.test(line)) - 8);
+  const summaryEndCandidates = [lines.findIndex((line) => /^description$/i.test(line)), lines.findIndex((line) => /^additional information$/i.test(line)), lines.findIndex((line) => /related products/i.test(line))].filter((index) => index > summaryStart);
+  const summaryEnd = summaryEndCandidates.length ? Math.min(...summaryEndCandidates) : Math.min(lines.length, summaryStart + 80);
+  return lines.slice(summaryStart, summaryEnd).join(" · ");
+}
+function extractStarcampProductPrice(rawText: string): StarcampPriceMatch {
+  const windowText = starcampPriceWindow(rawText);
+  const ignored = Array.from(new Set(Array.from(windowText.matchAll(/€\s*(?:0(?:\.00)?|1(?:\.00)?|10(?:\.00)?|60(?:\.00)?)(?!\d)/gi)).map((match) => match[0].replace(/€\s*/, "€"))));
+  const rangePatterns = [
+    /price\s+range\s*:\s*€\s*(\d+(?:\.\d{2})?)\s*(?:through|to|[-–])\s*€\s*(\d+(?:\.\d{2})?)/i,
+    /€\s*(\d+(?:\.\d{2})?)\s*(?:through|to|[-–])\s*€\s*(\d+(?:\.\d{2})?)/i,
+  ];
+  for (const pattern of rangePatterns) {
+    const match = windowText.match(pattern);
+    if (!match) continue;
+    const low = Math.min(Number(match[1]), Number(match[2]));
+    if (low >= 80) return { price: formatEuroPrice(low), source: "price_range_low", ignored };
+    ignored.push(match[0]);
+  }
+  const fixedMatches = Array.from(windowText.matchAll(/€\s*(\d+(?:\.\d{2})?)/gi)).map((match) => ({ label: match[0].replace(/€\s*/, "€"), value: Number(match[1]) }));
+  const fixed = fixedMatches.find((match) => match.value >= 80);
+  if (fixed) return { price: formatEuroPrice(fixed.value), source: "fixed_product_price", ignored };
+  return { price: "", source: "ignored_noise_price", ignored: [...ignored, ...fixedMatches.map((match) => match.label)] };
+}
+
 function extractStarcampLocation(rawText: string, fallbackTown: string) {
   const lines = rawText.replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
   const titleLine = lines.find((line) => /\b(?:summer|easter)\s+camp\b/i.test(line) && !navigationReject.test(line)) ?? "";
@@ -272,7 +302,8 @@ function extractStarcampCamps(rawText: string, input: DiscoveryInput, sourceMeth
   const fallbackTown = starcampTownFromUrl(input.sourceUrl);
   const { town, county, address, titleLine } = extractStarcampLocation(rawText, fallbackTown);
   const dateRanges = extractStarcampDateRanges(rawText);
-  const price = extractPrice(rawText);
+  const productPrice = extractStarcampProductPrice(rawText);
+  const price = productPrice.price;
   const ageRange = parseAgeRange(rawText);
   const bookingUrl = input.sourceUrl;
   const holidayFallback = input.holidayType?.trim() || (/easter/i.test(`${input.sourceUrl} ${rawText}`) ? "Easter" : /summer/i.test(`${input.sourceUrl} ${rawText}`) ? "Summer" : "");
@@ -289,13 +320,14 @@ function extractStarcampCamps(rawText: string, input: DiscoveryInput, sourceMeth
 function buildStarcampDebugCandidates(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) {
   const fallbackTown = starcampTownFromUrl(input.sourceUrl);
   const location = extractStarcampLocation(rawText, fallbackTown);
-  const price = extractPrice(rawText);
+  const productPrice = extractStarcampProductPrice(rawText);
+  const price = productPrice.price;
   const ageRange = parseAgeRange(rawText);
   const dateRanges = extractStarcampDateRanges(rawText);
   const listingRejected = isStarcampListingSourceUrl(input.sourceUrl) || !isStarcampProductSourceUrl(input.sourceUrl);
   return (dateRanges.length ? dateRanges : [{ label: "", startDate: "", endDate: "", priority: 0 }]).map((dateRange) => {
     const failures = [listingRejected ? "Starcamp listing/index pages are discovery-only; camps must come from /product/*-camp/ pages" : "", location.titleLine || location.town ? "" : "Missing camp_name", input.sourceUrl ? "" : "Missing booking_url", price ? "" : "Missing price", dateRange.startDate ? "" : "Missing start_date", dateRange.endDate ? "" : "Missing end_date", location.town || location.county ? "" : "Missing town or county"].filter(Boolean);
-    return { extractedText: `${location.titleLine || location.address} ${dateRange.label}`.trim(), parsedFields: { provider: "Starcamp", title: location.titleLine, matched_date: dateRange.label, start_date: dateRange.startDate, end_date: dateRange.endDate, price, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: location.address, town: location.town, county: location.county, booking_url: input.sourceUrl, source_method: sourceMethod, rejected_reason: failures.join(", ") }, confidence: failures.length ? 0 : 95, validationFailures: failures } satisfies ExtractionDebugCandidate;
+    return { extractedText: `${location.titleLine || location.address} ${dateRange.label}`.trim(), parsedFields: { provider: "Starcamp", title: location.titleLine, matched_date: dateRange.label, start_date: dateRange.startDate, end_date: dateRange.endDate, price, matched_product_price: productPrice.price || productPrice.ignored.join(", "), price_source: productPrice.source, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: location.address, town: location.town, county: location.county, booking_url: input.sourceUrl, source_method: sourceMethod, rejected_reason: failures.join(", ") }, confidence: failures.length ? 0 : 95, validationFailures: failures } satisfies ExtractionDebugCandidate;
   });
 }
 
