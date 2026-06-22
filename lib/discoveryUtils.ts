@@ -257,7 +257,8 @@ function extractStarcampDateRanges(rawText: string) {
   return ranges;
 }
 
-type StarcampPriceMatch = { price: string; source: "fixed_product_price" | "price_range_low" | "ignored_noise_price"; ignored: string[] };
+type StarcampPriceCandidate = { price: string; source: "fixed_product_price" | "price_range_low" | "ignored_noise_price_low_confidence"; label: string; value: number };
+type StarcampPriceMatch = { price: string; source: "fixed_product_price" | "price_range_low" | "ignored_noise_price" | "ignored_noise_price_low_confidence"; ignored: string[]; scopedCandidates: string[]; fallbackCandidates: string[]; rejectionReason: string };
 function formatEuroPrice(value: string | number) { return `€${Number(value).toFixed(2)}`; }
 function normalizeStarcampText(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
 function starcampProductSlugTokens(sourceUrl: string) {
@@ -270,35 +271,46 @@ function starcampPriceWindows(rawText: string, sourceUrl: string) {
     const normalized = normalizeStarcampText(line);
     return tokens.length > 0 && tokens.every((token) => normalized.includes(token.toLowerCase()));
   });
-  const firstValidPriceIndex = lines.findIndex((line) => /€\s*(?:[8-9]\d|1\d{2}|2\d{2})(?:\.\d{2})?/.test(line));
-  const starts = [titleIndex >= 0 ? Math.max(0, titleIndex - 6) : -1, firstValidPriceIndex >= 0 ? Math.max(0, firstValidPriceIndex - 12) : -1, 0].filter((index) => index >= 0);
+  const firstAnyPriceIndex = lines.findIndex((line) => /€\s*\d+(?:\.\d{2})?/i.test(line));
+  const firstValidPriceIndex = lines.findIndex((line) => /€\s*(?:[7-9]\d|1\d{2}|2\d{2})(?:\.\d{2})?/i.test(line));
+  const starts = [titleIndex >= 0 ? Math.max(0, titleIndex - 8) : -1, firstValidPriceIndex >= 0 ? Math.max(0, firstValidPriceIndex - 14) : -1, firstAnyPriceIndex >= 0 ? Math.max(0, firstAnyPriceIndex - 14) : -1, 0].filter((index, position, values) => index >= 0 && values.indexOf(index) === position);
   return starts.map((start) => {
     const endCandidates = [lines.findIndex((line, index) => index > start && /^description$/i.test(line)), lines.findIndex((line, index) => index > start && /^additional information$/i.test(line)), lines.findIndex((line, index) => index > start && /related products|20% off any additional camps/i.test(line))].filter((index) => index > start);
-    const end = endCandidates.length ? Math.min(...endCandidates) : Math.min(lines.length, start + 45);
+    const end = endCandidates.length ? Math.min(...endCandidates) : Math.min(lines.length, start + 70);
     return lines.slice(start, end).join(" · ");
   });
 }
-function extractStarcampProductPrice(rawText: string, sourceUrl: string): StarcampPriceMatch {
-  const windows = starcampPriceWindows(rawText, sourceUrl);
-  const ignored = Array.from(new Set(windows.flatMap((windowText) => Array.from(windowText.matchAll(/€\s*(?:0(?:\.00)?|1(?:\.00)?|10(?:\.00)?|60(?:\.00)?)(?!\d)/gi)).map((match) => match[0].replace(/€\s*/, "€")))));
-  const rangePatterns = [
-    /price\s+range\s*:\s*€\s*(\d+(?:\.\d{2})?)\s*(?:through|to|[-–])\s*€\s*(\d+(?:\.\d{2})?)/i,
-    /€\s*(\d+(?:\.\d{2})?)\s*(?:through|to|[-–])\s*€\s*(\d+(?:\.\d{2})?)/i,
-  ];
-  for (const windowText of windows) {
-    for (const pattern of rangePatterns) {
-      const match = windowText.match(pattern);
-      if (!match) continue;
-      const low = Math.min(Number(match[1]), Number(match[2]));
-      if (low >= 80) return { price: formatEuroPrice(low), source: "price_range_low", ignored };
-      ignored.push(match[0]);
-    }
-    const fixedMatches = Array.from(windowText.matchAll(/€\s*(\d+(?:\.\d{2})?)/gi)).map((match) => ({ label: match[0].replace(/€\s*/, "€"), value: Number(match[1]) }));
-    const fixed = fixedMatches.find((match) => match.value >= 80);
-    if (fixed) return { price: formatEuroPrice(fixed.value), source: "fixed_product_price", ignored };
-    ignored.push(...fixedMatches.map((match) => match.label));
+function collectStarcampPriceCandidates(text: string) {
+  const candidates: StarcampPriceCandidate[] = [];
+  const seen = new Set<string>();
+  const addCandidate = (candidate: StarcampPriceCandidate) => { const key = `${candidate.source}:${candidate.price}:${candidate.label}`; if (!seen.has(key)) { seen.add(key); candidates.push(candidate); } };
+  for (const match of Array.from(text.matchAll(/price\s+range\s*:\s*€\s*(\d+(?:\.\d{2})?)\s*(?:through|to|[-–—])\s*€\s*(\d+(?:\.\d{2})?)/gi))) {
+    const low = Math.min(Number(match[1]), Number(match[2]));
+    addCandidate({ price: formatEuroPrice(low), source: low >= 70 ? "price_range_low" : "ignored_noise_price_low_confidence", label: match[0], value: low });
   }
-  return { price: "", source: "ignored_noise_price", ignored: Array.from(new Set(ignored)) };
+  for (const match of Array.from(text.matchAll(/€\s*(\d+(?:\.\d{2})?)\s*(?:through|to|[-–—])\s*€\s*(\d+(?:\.\d{2})?)/gi))) {
+    const low = Math.min(Number(match[1]), Number(match[2]));
+    addCandidate({ price: formatEuroPrice(low), source: low >= 70 ? "price_range_low" : "ignored_noise_price_low_confidence", label: match[0], value: low });
+  }
+  for (const match of Array.from(text.matchAll(/€\s*(\d+(?:\.\d{2})?)/gi))) {
+    const value = Number(match[1]);
+    addCandidate({ price: formatEuroPrice(value), source: value >= 70 ? "fixed_product_price" : "ignored_noise_price_low_confidence", label: match[0].replace(/€\s*/, "€"), value });
+  }
+  return candidates;
+}
+function isStarcampNoisePrice(candidate: StarcampPriceCandidate) { return candidate.value === 0 || candidate.value === 1 || candidate.value === 10 || candidate.value === 60; }
+function bestStarcampPriceCandidate(candidates: StarcampPriceCandidate[]) { return candidates.find((candidate) => candidate.value >= 70 && !isStarcampNoisePrice(candidate)); }
+function extractStarcampProductPrice(rawText: string, sourceUrl: string): StarcampPriceMatch {
+  const scopedCandidates = starcampPriceWindows(rawText, sourceUrl).flatMap(collectStarcampPriceCandidates);
+  const fallbackCandidates = collectStarcampPriceCandidates(rawText);
+  const ignored = Array.from(new Set([...scopedCandidates, ...fallbackCandidates].filter(isStarcampNoisePrice).map((candidate) => candidate.label)));
+  const scoped = bestStarcampPriceCandidate(scopedCandidates);
+  if (scoped) return { price: scoped.price, source: scoped.source, ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rejectionReason: "" };
+  const fallback = bestStarcampPriceCandidate(fallbackCandidates);
+  if (fallback) return { price: fallback.price, source: fallback.source, ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rejectionReason: "" };
+  const lowConfidenceNoise = [...scopedCandidates, ...fallbackCandidates].find(isStarcampNoisePrice);
+  if (lowConfidenceNoise) return { price: lowConfidenceNoise.price, source: "ignored_noise_price_low_confidence", ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rejectionReason: "Only ignored/noise price matches found; using low-confidence fallback" };
+  return { price: "", source: "ignored_noise_price", ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rejectionReason: "No Starcamp product price matched in scoped or fallback search" };
 }
 
 function extractStarcampLocation(rawText: string, fallbackTown: string) {
@@ -323,7 +335,7 @@ function extractStarcampCamps(rawText: string, input: DiscoveryInput, sourceMeth
   const bookingUrl = input.sourceUrl;
   const holidayFallback = input.holidayType?.trim() || (/easter/i.test(`${input.sourceUrl} ${rawText}`) ? "Easter" : /summer/i.test(`${input.sourceUrl} ${rawText}`) ? "Summer" : "");
   const campNameBase = titleLine || `${town || fallbackTown} ${holidayFallback || ""} Camp`.replace(/\s+/g, " ").trim();
-  const rejectionBase = [campNameBase ? "" : "Missing camp_name", bookingUrl ? "" : "Missing booking_url", price ? "" : "Missing price", productPrice.price && price !== productPrice.price ? `Matched product price ${productPrice.price} differs from final price ${price}` : "", town || county ? "" : "Missing town or county"].filter(Boolean);
+  const rejectionBase = [campNameBase ? "" : "Missing camp_name", bookingUrl ? "" : "Missing booking_url", price ? "" : "Missing price", productPrice.price && price !== productPrice.price ? `Matched product price ${productPrice.price} differs from final price ${price}` : "", productPrice.rejectionReason && !price ? productPrice.rejectionReason : "", town || county ? "" : "Missing town or county"].filter(Boolean);
   if (rejectionBase.length || dateRanges.length === 0) return [];
   return dateRanges.map((dateRange) => {
     const holidayType = inferHolidayFromDate(dateRange.startDate, holidayFallback) as HolidayType;
@@ -342,7 +354,7 @@ function buildStarcampDebugCandidates(rawText: string, input: DiscoveryInput, so
   const listingRejected = isStarcampListingSourceUrl(input.sourceUrl) || !isStarcampProductSourceUrl(input.sourceUrl);
   return (dateRanges.length ? dateRanges : [{ label: "", startDate: "", endDate: "", priority: 0 }]).map((dateRange) => {
     const failures = [listingRejected ? "Starcamp listing/index pages are discovery-only; camps must come from /product/*-camp/ pages" : "", location.titleLine || location.town ? "" : "Missing camp_name", input.sourceUrl ? "" : "Missing booking_url", price ? "" : "Missing price", dateRange.startDate ? "" : "Missing start_date", dateRange.endDate ? "" : "Missing end_date", location.town || location.county ? "" : "Missing town or county"].filter(Boolean);
-    return { extractedText: `${location.titleLine || location.address} ${dateRange.label}`.trim(), parsedFields: { provider: "Starcamp", title: location.titleLine, matched_date: dateRange.label, start_date: dateRange.startDate, end_date: dateRange.endDate, price, matched_product_price: productPrice.price || productPrice.ignored.join(", "), price_source: productPrice.source, ignored_price_matches: productPrice.ignored.join(", "), final_price_used: price, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: location.address, town: location.town, county: location.county, booking_url: input.sourceUrl, source_method: sourceMethod, rejected_reason: failures.join(", ") }, confidence: failures.length ? 0 : 95, validationFailures: failures } satisfies ExtractionDebugCandidate;
+    return { extractedText: `${location.titleLine || location.address} ${dateRange.label}`.trim(), parsedFields: { provider: "Starcamp", title: location.titleLine, matched_date: dateRange.label, start_date: dateRange.startDate, end_date: dateRange.endDate, price, matched_product_price: productPrice.price, price_source: productPrice.source, scoped_price_candidates: productPrice.scopedCandidates.join(", "), fallback_price_candidates: productPrice.fallbackCandidates.join(", "), ignored_noise_price_matches: productPrice.ignored.join(", "), final_price_used: price, price_rejection_reason: productPrice.rejectionReason, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: location.address, town: location.town, county: location.county, booking_url: input.sourceUrl, source_method: sourceMethod, rejected_reason: failures.join(", ") }, confidence: failures.length ? 0 : 95, validationFailures: failures } satisfies ExtractionDebugCandidate;
   });
 }
 
