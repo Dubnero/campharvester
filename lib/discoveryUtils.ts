@@ -201,7 +201,7 @@ function bricksScheduleRows(lines: string[]) {
   return rows;
 }
 function extractBricksBookingCamps(rawText: string, input: DiscoveryInput, providerName: string, providerId: string, fallbackCounty: string, sourceMethod: SourceMethod) {
-  const lines = rawText.replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
+  const lines = normalizeStarcampPriceText(rawText).replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
   const camps: DiscoveryCamp[] = [];
   for (const row of bricksScheduleRows(lines)) {
     const index = row.index;
@@ -258,9 +258,17 @@ function extractStarcampDateRanges(rawText: string) {
 }
 
 type StarcampPriceCandidate = { price: string; source: "fixed_product_price" | "price_range_low" | "ignored_noise_price_low_confidence"; label: string; value: number };
-type StarcampPriceMatch = { price: string; source: "fixed_product_price" | "price_range_low" | "ignored_noise_price" | "ignored_noise_price_low_confidence"; ignored: string[]; scopedCandidates: string[]; fallbackCandidates: string[]; rejectionReason: string };
+type StarcampPriceMatch = { price: string; source: "fixed_product_price" | "price_range_low" | "ignored_noise_price" | "ignored_noise_price_low_confidence"; ignored: string[]; scopedCandidates: string[]; fallbackCandidates: string[]; rawPriceTextExamples: string[]; normalizedPriceCandidates: string[]; rejectionReason: string };
 function formatEuroPrice(value: string | number) { return `€${Number(value).toFixed(2)}`; }
 function normalizeStarcampText(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+function rawStarcampPriceExamples(rawText: string) { return Array.from(new Set(Array.from(rawText.matchAll(/(?:€|&euro;|&#8364;|EUR)\s*(?:\r?\n|\s|·)*\d+(?:\.\d{2})?/gi)).map((match) => match[0].trim()))); }
+function normalizeStarcampPriceText(value: string) {
+  return value
+    .replace(/&euro;|&#8364;/gi, "€")
+    .replace(/\bEUR\b\s*/gi, "€")
+    .replace(/€\s*(?:\r?\n|·)\s*/g, "€")
+    .replace(/€\s+(?=\d)/g, "€");
+}
 function starcampProductSlugTokens(sourceUrl: string) {
   try { return new URL(sourceUrl).pathname.split("/").filter(Boolean).pop()?.replace(/-(?:summer|easter|halloween|midterm|christmas)?-?camp$/i, "").split("-").filter((part) => part.length > 2) ?? []; } catch { return []; }
 }
@@ -301,16 +309,18 @@ function collectStarcampPriceCandidates(text: string) {
 function isStarcampNoisePrice(candidate: StarcampPriceCandidate) { return candidate.value === 0 || candidate.value === 1 || candidate.value === 10 || candidate.value === 60; }
 function bestStarcampPriceCandidate(candidates: StarcampPriceCandidate[]) { return candidates.find((candidate) => candidate.value >= 70 && !isStarcampNoisePrice(candidate)); }
 function extractStarcampProductPrice(rawText: string, sourceUrl: string): StarcampPriceMatch {
-  const scopedCandidates = starcampPriceWindows(rawText, sourceUrl).flatMap(collectStarcampPriceCandidates);
-  const fallbackCandidates = collectStarcampPriceCandidates(rawText);
+  const normalizedText = normalizeStarcampPriceText(rawText);
+  const rawExamples = rawStarcampPriceExamples(rawText);
+  const scopedCandidates = starcampPriceWindows(normalizedText, sourceUrl).flatMap(collectStarcampPriceCandidates);
+  const fallbackCandidates = collectStarcampPriceCandidates(normalizedText);
   const ignored = Array.from(new Set([...scopedCandidates, ...fallbackCandidates].filter(isStarcampNoisePrice).map((candidate) => candidate.label)));
   const scoped = bestStarcampPriceCandidate(scopedCandidates);
-  if (scoped) return { price: scoped.price, source: scoped.source, ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rejectionReason: "" };
+  if (scoped) return { price: scoped.price, source: scoped.source, ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rawPriceTextExamples: rawExamples, normalizedPriceCandidates: Array.from(new Set([...scopedCandidates, ...fallbackCandidates].map((candidate) => candidate.label))), rejectionReason: "" };
   const fallback = bestStarcampPriceCandidate(fallbackCandidates);
-  if (fallback) return { price: fallback.price, source: fallback.source, ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rejectionReason: "" };
+  if (fallback) return { price: fallback.price, source: fallback.source, ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rawPriceTextExamples: rawExamples, normalizedPriceCandidates: Array.from(new Set([...scopedCandidates, ...fallbackCandidates].map((candidate) => candidate.label))), rejectionReason: "" };
   const lowConfidenceNoise = [...scopedCandidates, ...fallbackCandidates].find(isStarcampNoisePrice);
-  if (lowConfidenceNoise) return { price: lowConfidenceNoise.price, source: "ignored_noise_price_low_confidence", ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rejectionReason: "Only ignored/noise price matches found; using low-confidence fallback" };
-  return { price: "", source: "ignored_noise_price", ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rejectionReason: "No Starcamp product price matched in scoped or fallback search" };
+  if (lowConfidenceNoise) return { price: lowConfidenceNoise.price, source: "ignored_noise_price_low_confidence", ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rawPriceTextExamples: rawExamples, normalizedPriceCandidates: Array.from(new Set([...scopedCandidates, ...fallbackCandidates].map((candidate) => candidate.label))), rejectionReason: "Only ignored/noise price matches found; using low-confidence fallback" };
+  return { price: "", source: "ignored_noise_price", ignored, scopedCandidates: scopedCandidates.map((candidate) => candidate.label), fallbackCandidates: fallbackCandidates.map((candidate) => candidate.label), rawPriceTextExamples: rawExamples, normalizedPriceCandidates: Array.from(new Set([...scopedCandidates, ...fallbackCandidates].map((candidate) => candidate.label))), rejectionReason: "No Starcamp product price matched in scoped or fallback search" };
 }
 
 function extractStarcampLocation(rawText: string, fallbackTown: string) {
@@ -354,7 +364,7 @@ function buildStarcampDebugCandidates(rawText: string, input: DiscoveryInput, so
   const listingRejected = isStarcampListingSourceUrl(input.sourceUrl) || !isStarcampProductSourceUrl(input.sourceUrl);
   return (dateRanges.length ? dateRanges : [{ label: "", startDate: "", endDate: "", priority: 0 }]).map((dateRange) => {
     const failures = [listingRejected ? "Starcamp listing/index pages are discovery-only; camps must come from /product/*-camp/ pages" : "", location.titleLine || location.town ? "" : "Missing camp_name", input.sourceUrl ? "" : "Missing booking_url", price ? "" : "Missing price", dateRange.startDate ? "" : "Missing start_date", dateRange.endDate ? "" : "Missing end_date", location.town || location.county ? "" : "Missing town or county"].filter(Boolean);
-    return { extractedText: `${location.titleLine || location.address} ${dateRange.label}`.trim(), parsedFields: { provider: "Starcamp", title: location.titleLine, matched_date: dateRange.label, start_date: dateRange.startDate, end_date: dateRange.endDate, price, matched_product_price: productPrice.price, price_source: productPrice.source, scoped_price_candidates: productPrice.scopedCandidates.join(", "), fallback_price_candidates: productPrice.fallbackCandidates.join(", "), ignored_noise_price_matches: productPrice.ignored.join(", "), final_price_used: price, price_rejection_reason: productPrice.rejectionReason, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: location.address, town: location.town, county: location.county, booking_url: input.sourceUrl, source_method: sourceMethod, rejected_reason: failures.join(", ") }, confidence: failures.length ? 0 : 95, validationFailures: failures } satisfies ExtractionDebugCandidate;
+    return { extractedText: `${location.titleLine || location.address} ${dateRange.label}`.trim(), parsedFields: { provider: "Starcamp", title: location.titleLine, matched_date: dateRange.label, start_date: dateRange.startDate, end_date: dateRange.endDate, price, matched_product_price: productPrice.price, price_source: productPrice.source, scoped_price_candidates: productPrice.scopedCandidates.join(", "), fallback_price_candidates: productPrice.fallbackCandidates.join(", "), raw_price_text_examples: productPrice.rawPriceTextExamples.join(", "), normalized_price_candidates: productPrice.normalizedPriceCandidates.join(", "), ignored_noise_price_matches: productPrice.ignored.join(", "), final_price_used: price, price_rejection_reason: productPrice.rejectionReason, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: location.address, town: location.town, county: location.county, booking_url: input.sourceUrl, source_method: sourceMethod, rejected_reason: failures.join(", ") }, confidence: failures.length ? 0 : 95, validationFailures: failures } satisfies ExtractionDebugCandidate;
   });
 }
 
