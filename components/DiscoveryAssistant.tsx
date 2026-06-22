@@ -92,7 +92,9 @@ export function DiscoveryAssistant() {
       const existing = providerMap.get(key);
       if (!existing || provider.confidence > existing.confidence || existing.source_method === "crawler") providerMap.set(key, existing ? { ...provider, duplicateWarnings: existing.duplicateWarnings } : provider);
     }
-    return { providers: Array.from(providerMap.values()), camps: dedupeDiscoveryCamps(extracted.flatMap((item) => item.camps)), warnings: Array.from(new Set(extracted.flatMap((item) => item.warnings))) };
+    const mergedCamps = dedupeDiscoveryCamps(extracted.flatMap((item) => item.camps));
+    const mergedWarnings = Array.from(new Set(extracted.flatMap((item) => item.warnings))).filter((warning) => !(mergedCamps.some((camp) => camp.provider_id === "starcamp" && camp.confidence >= 60) && warning === "No high-confidence camp offerings found; generic navigation items were ignored."));
+    return { providers: Array.from(providerMap.values()), camps: mergedCamps, warnings: mergedWarnings };
   }
 
   async function applyExtraction(pages = pageAnalyses, manual = manualPages) {
@@ -150,7 +152,7 @@ export function DiscoveryAssistant() {
       const originalProviderId = provider.provider_id;
       if (match) {
         providerIdMap.set(originalProviderId, match.provider_id);
-        return { ...provider, provider_id: match.provider_id, provider_name: match.provider_name, duplicateWarnings: [`Existing provider found: ${match.provider_id} / ${match.provider_name}`], selected: false };
+        return { ...provider, ...match, duplicateWarnings: [`Existing provider found: ${match.provider_id} / ${match.provider_name}`], selected: false, needs_review: provider.needs_review, confidence: provider.confidence, fieldConfidence: provider.fieldConfidence, extractionWarnings: provider.extractionWarnings, source_method: provider.source_method };
       }
       const assignedProviderId = /^P\d{4}$/.test(provider.provider_id) ? provider.provider_id : nextDraftProviderId;
       providerIdMap.set(originalProviderId, assignedProviderId);
