@@ -242,15 +242,23 @@ function starcampTownFromUrl(sourceUrl: string) {
     return slug.replace(/-(?:summer|easter|halloween|midterm|christmas)?-?camp$/i, "").split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
   } catch { return ""; }
 }
+type StarcampDateRange = BricksDateRange & { source: "radio_label" | "variation_option" | "readable_text" };
+function normalizeStarcampDateText(rawText: string) { return rawText.replace(/&ndash;|&#8211;|&mdash;|&#8212;/gi, "–").replace(/&nbsp;/gi, " "); }
+function inferStarcampDateOptionSource(context: string): StarcampDateRange["source"] {
+  if (/radio|select|option|attribute|variation/i.test(context)) return /radio/i.test(context) ? "radio_label" : "variation_option";
+  return "readable_text";
+}
 function extractStarcampDateRanges(rawText: string) {
-  const compact = rawText.replace(/\r/g, "\n").replace(/\n+/g, " · ");
-  const ranges: BricksDateRange[] = [];
+  const normalizedText = normalizeStarcampDateText(rawText);
+  const compact = normalizedText.replace(/\r/g, "\n").replace(/\n+/g, " · ");
+  const ranges: StarcampDateRange[] = [];
   const seen = new Set<string>();
-  const regex = /\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:-|–|to)\s*(\d{1,2})(?:st|nd|rd|th)?\s+(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)(?:\s+(20\d{2}))?\b/gi;
+  const regex = /\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:-|–|—|to)\s*(\d{1,2})(?:st|nd|rd|th)?\s+(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)(?:\s+(20\d{2}))?\b/gi;
   let match: RegExpExecArray | null;
-  const fallbackYear = inferYear(rawText);
+  const fallbackYear = inferYear(normalizedText);
   while ((match = regex.exec(compact)) !== null) {
-    const range = { label: match[0], startDate: isoDate(match[1], match[3], match[4] || fallbackYear), endDate: isoDate(match[2], match[3], match[4] || fallbackYear), priority: 4 };
+    const context = compact.slice(Math.max(0, match.index - 160), Math.min(compact.length, match.index + match[0].length + 160));
+    const range = { label: match[0], startDate: isoDate(match[1], match[3], match[4] || fallbackYear), endDate: isoDate(match[2], match[3], match[4] || fallbackYear), priority: 4, source: inferStarcampDateOptionSource(context) } satisfies StarcampDateRange;
     const key = `${range.startDate}:${range.endDate}`;
     if (!seen.has(key)) { seen.add(key); ranges.push(range); }
   }
@@ -360,6 +368,7 @@ function extractStarcampCamps(rawText: string, input: DiscoveryInput, sourceMeth
   const fallbackTown = starcampTownFromUrl(input.sourceUrl);
   const { town, county, address, titleLine } = extractStarcampLocation(rawText, fallbackTown);
   const dateRanges = extractStarcampDateRanges(rawText);
+  const selectedDefaultDateOption = dateRanges[0]?.label ?? "";
   const productPrice = extractStarcampProductPrice(rawText, input.sourceUrl);
   const price = productPrice.price;
   const ageRange = parseAgeRange(rawText);
@@ -387,10 +396,11 @@ function buildStarcampDebugCandidates(rawText: string, input: DiscoveryInput, so
   const cleanedCampName = cleanStarcampCampName(originalCampName, input.sourceUrl, holidayInfo.holiday);
   const ageRange = parseAgeRange(rawText);
   const dateRanges = extractStarcampDateRanges(rawText);
+  const selectedDefaultDateOption = dateRanges[0]?.label ?? "";
   const listingRejected = isStarcampListingSourceUrl(input.sourceUrl) || !isStarcampProductSourceUrl(input.sourceUrl);
-  return (dateRanges.length ? dateRanges : [{ label: "", startDate: "", endDate: "", priority: 0 }]).map((dateRange) => {
+  return (dateRanges.length ? dateRanges : [{ label: "", startDate: "", endDate: "", priority: 0, source: "readable_text" as const }]).map((dateRange) => {
     const failures = [listingRejected ? "Starcamp listing/index pages are discovery-only; camps must come from /product/*-camp/ pages" : "", location.titleLine || location.town ? "" : "Missing camp_name", input.sourceUrl ? "" : "Missing booking_url", price ? "" : "Missing price", dateRange.startDate ? "" : "Missing start_date", dateRange.endDate ? "" : "Missing end_date", location.town || location.county ? "" : "Missing town or county"].filter(Boolean);
-    return { extractedText: `${location.titleLine || location.address} ${dateRange.label}`.trim(), parsedFields: { provider: "Starcamp", title: cleanedCampName, original_camp_name: originalCampName, cleaned_camp_name: cleanedCampName, holiday_type_source: holidayInfo.source, matched_date: dateRange.label, start_date: dateRange.startDate, end_date: dateRange.endDate, price, matched_product_price: productPrice.price, price_source: productPrice.source, scoped_price_candidates: productPrice.scopedCandidates.join(", "), fallback_price_candidates: productPrice.fallbackCandidates.join(", "), raw_price_text_examples: productPrice.rawPriceTextExamples.join(", "), normalized_price_candidates: productPrice.normalizedPriceCandidates.join(", "), ignored_noise_price_matches: productPrice.ignored.join(", "), final_price_used: price, price_rejection_reason: productPrice.rejectionReason, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: location.address, town: location.town, county: location.county, booking_url: input.sourceUrl, source_method: sourceMethod, rejected_reason: failures.join(", ") }, confidence: failures.length ? 0 : 95, validationFailures: failures } satisfies ExtractionDebugCandidate;
+    return { extractedText: `${location.titleLine || location.address} ${dateRange.label}`.trim(), parsedFields: { provider: "Starcamp", title: cleanedCampName, original_camp_name: originalCampName, cleaned_camp_name: cleanedCampName, holiday_type_source: holidayInfo.source, all_date_options_found: dateRanges.map((range) => range.label).join(", "), selected_default_date_option: selectedDefaultDateOption, camp_records_created_from_product: dateRanges.length, date_option_source: dateRange.source, date_options_rejected: "", matched_date: dateRange.label, start_date: dateRange.startDate, end_date: dateRange.endDate, price, matched_product_price: productPrice.price, price_source: productPrice.source, scoped_price_candidates: productPrice.scopedCandidates.join(", "), fallback_price_candidates: productPrice.fallbackCandidates.join(", "), raw_price_text_examples: productPrice.rawPriceTextExamples.join(", "), normalized_price_candidates: productPrice.normalizedPriceCandidates.join(", "), ignored_noise_price_matches: productPrice.ignored.join(", "), final_price_used: price, price_rejection_reason: productPrice.rejectionReason, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: location.address, town: location.town, county: location.county, booking_url: input.sourceUrl, source_method: sourceMethod, rejected_reason: failures.join(", ") }, confidence: failures.length ? 0 : 95, validationFailures: failures } satisfies ExtractionDebugCandidate;
   });
 }
 
