@@ -4,7 +4,8 @@ export type DiscoveryInput = { sourceUrl: string; providerId?: string; providerN
 export type ConfidenceBreakdown = Record<string, number>;
 export type SourceMethod = "crawler" | "manual_paste";
 export type DiscoveryProvider = Provider & { selected: boolean; needs_review: boolean; duplicateWarnings: string[]; confidence: number; fieldConfidence: ConfidenceBreakdown; extractionWarnings: string[]; source_method: SourceMethod };
-export type DiscoveryCamp = Camp & { selected: boolean; needs_review: boolean; duplicateWarnings: string[]; confidence: number; fieldConfidence: ConfidenceBreakdown; extractionWarnings: string[]; source_method: SourceMethod };
+export type CampComparison = { field: string; existing: string; extracted: string; warning: string };
+export type DiscoveryCamp = Camp & { selected: boolean; needs_review: boolean; duplicateWarnings: string[]; comparisonWarnings?: CampComparison[]; matchedExistingCamp?: Camp; confidence: number; fieldConfidence: ConfidenceBreakdown; extractionWarnings: string[]; source_method: SourceMethod };
 export type DiscoveryPageAnalysis = { url: string; text?: string; readableTextLength: number; candidateCount: number; dynamicWarning?: boolean; status: "analysed" | "failed" | "manual_added" | "extracted"; failureReason?: string; sourceMethod: SourceMethod; extractionBlocked?: boolean };
 export type ExtractionDebugMatch = { type: "Provider" | "Date" | "Time" | "Age" | "Location" | "Town" | "Price"; value: string };
 export type ExtractionDebugCandidate = { extractedText: string; parsedFields: Record<string, string | number>; confidence: number; validationFailures: string[] };
@@ -239,7 +240,7 @@ function isStarcampListingSourceUrl(sourceUrl: string) {
 function starcampTownFromUrl(sourceUrl: string) {
   try {
     const slug = new URL(sourceUrl).pathname.split("/").filter(Boolean).pop() ?? "";
-    return slug.replace(/-(?:summer|easter|halloween|midterm|christmas)?-?camp$/i, "").split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+    return slug.replace(/-(?:summer|easter|halloween|midterm|christmas)?-?camp$/i, "").split("-")[0].replace(/\b\w/g, (letter) => letter.toUpperCase());
   } catch { return ""; }
 }
 type StarcampDateRange = BricksDateRange & { source: "radio_label" | "variation_option" | "readable_text" };
@@ -352,13 +353,25 @@ function cleanStarcampCampName(originalName: string, sourceUrl: string, holidayT
   return base.replace(/\s{2,}/g, " ").trim();
 }
 
+function cleanStarcampLocationText(value: string) {
+  return value.replace(/&amp;/gi, "&").replace(/^Starcamp\s*/i, "").replace(/\b(?:summer|easter)\s+camp\b.*$/i, "").replace(/^[-–—:,]+|[-–—:,]+$/g, "").replace(/\s{2,}/g, " ").trim();
+}
+
+function parseStarcampTownVenue(value: string, fallbackTown: string) {
+  const cleaned = cleanStarcampLocationText(value);
+  const match = cleaned.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+  if (!match) return { town: fallbackTown, venue: cleaned };
+  return { town: titleCaseStarcampName(match[1].trim()), venue: cleanStarcampLocationText(match[2]) };
+}
+
 function extractStarcampLocation(rawText: string, fallbackTown: string) {
   const lines = rawText.replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
-  const titleLine = lines.find((line) => /\b(?:summer|easter)\s+camp\b/i.test(line) && !navigationReject.test(line)) ?? "";
+  const titleLine = lines.find((line) => /^.{3,90}\s*[-–—]\s*.{3,90}$/.test(line) && !navigationReject.test(line)) ?? lines.find((line) => /\b(?:summer|easter)\s+camp\b/i.test(line) && !navigationReject.test(line)) ?? "";
   const venueLabel = lines.find((line) => /(?:venue|location|camp location|address)\s*:/i.test(line))?.replace(/.*?(?:venue|location|camp location|address)\s*:\s*/i, "") ?? "";
+  const townVenue = parseStarcampTownVenue(venueLabel || titleLine, fallbackTown);
   const county = findKnown(rawText, counties);
-  const town = findKnown(rawText, [...southDublinTowns, fallbackTown].filter(Boolean)) || fallbackTown;
-  const address = venueLabel || titleLine.replace(/\b(?:summer|easter)\s+camp\b.*$/i, "").replace(/^Starcamp\s*/i, "").trim() || town;
+  const town = townVenue.town || findKnown(rawText, [...southDublinTowns, fallbackTown].filter(Boolean)) || fallbackTown;
+  const address = townVenue.venue && townVenue.venue.toLowerCase() !== town.toLowerCase() ? townVenue.venue : cleanStarcampLocationText(venueLabel || titleLine) || town;
   return { town, county, address, titleLine };
 }
 function extractStarcampCamps(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) {

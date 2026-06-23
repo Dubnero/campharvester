@@ -911,6 +911,16 @@ button:disabled:hover {
   padding: 0.75rem;
 }
 
+.comparison-table {
+  font-size: 0.78rem;
+  margin-top: 0.4rem;
+}
+
+.comparison-table th,
+.comparison-table td {
+  padding: 0.35rem;
+}
+
 .card-edit {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
