@@ -21,6 +21,7 @@ const campFields: Array<keyof DiscoveryCamp> = ["selected", "needs_review", "cam
 function label(field: string) { return field.replaceAll("_", " "); }
 function uniqueOptions(values: string[]) { return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)); }
 function normalizedIncludes(value: string | number | boolean | undefined, search: string) { return String(value ?? "").toLowerCase().includes(search.trim().toLowerCase()); }
+function campStableKey(camp: Pick<DiscoveryCamp, "camp_id" | "provider_id" | "camp_name" | "town" | "start_date" | "end_date" | "booking_url">) { return camp.camp_id?.trim() || [camp.provider_id, camp.camp_name, camp.town, camp.start_date, camp.end_date, camp.booking_url].map((value) => String(value ?? "").trim().toLowerCase()).join("|"); }
 function methodBadge(method: DiscoveryProvider["source_method"] | DiscoveryCamp["source_method"]) { return method === "manual_paste" ? "📋 Manual" : "🕷 Crawled"; }
 function asImportProvider(provider: DiscoveryProvider): Provider { const { selected, needs_review, duplicateWarnings, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = provider; return { ...row, status: "draft", verified: false, featured: false }; }
 const developerDebug = true;
@@ -72,6 +73,7 @@ export function DiscoveryAssistant() {
   const [manualDraft, setManualDraft] = useState("");
   const [providers, setProviders] = useState<DiscoveryProvider[]>([]);
   const [camps, setCamps] = useState<DiscoveryCamp[]>([]);
+  const [selectedCampKeys, setSelectedCampKeys] = useState<Set<string>>(new Set());
   const [warnings, setWarnings] = useState<string[]>([]);
   const [analysisLog, setAnalysisLog] = useState<AnalysisLog | null>(null);
   const [pageAnalyses, setPageAnalyses] = useState<DiscoveryPageAnalysis[]>([]);
@@ -80,7 +82,8 @@ export function DiscoveryAssistant() {
   const [debugItems, setDebugItems] = useState<ExtractionPipelineDebug[]>([]);
   const [debugCounts, setDebugCounts] = useState<DebugCounts>(blankDebugCounts);
   const selectedProviders = useMemo(() => providers.filter((provider) => provider.selected && !provider.duplicateWarnings.some((warning) => warning.startsWith("Existing provider found"))), [providers]);
-  const selectedCamps = useMemo(() => camps.filter((camp) => camp.selected && camp.duplicateWarnings.length === 0), [camps]);
+  const campsWithSelection = useMemo(() => camps.map((camp) => ({ ...camp, selected: selectedCampKeys.has(campStableKey(camp)) })), [camps, selectedCampKeys]);
+  const selectedCamps = useMemo(() => campsWithSelection.filter((camp) => selectedCampKeys.has(campStableKey(camp)) && camp.duplicateWarnings.length === 0), [campsWithSelection, selectedCampKeys]);
 
   function mergeExtraction(pages: DiscoveryPageAnalysis[], manual: Record<string, ManualPage>) {
     const inputs = [
@@ -122,6 +125,7 @@ export function DiscoveryAssistant() {
     setActiveManualUrl("");
     setDebugItems([]);
     setDebugCounts(blankDebugCounts);
+    setSelectedCampKeys(new Set());
     if (!manualMode) {
       const response = await fetch("/api/discovery/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: form.sourceUrl }) });
       const result = await response.json();
@@ -176,15 +180,29 @@ export function DiscoveryAssistant() {
       return { ...updatedCamp, duplicateWarnings, selected: duplicateWarnings.length === 0 && updatedCamp.selected };
     });
     setProviders(flaggedProviders);
-    setCamps(flaggedCamps);
+    setCamps(flaggedCamps.map((camp) => ({ ...camp, selected: false })));
+    setSelectedCampKeys(new Set(flaggedCamps.filter((camp) => camp.selected).map(campStableKey)));
     const repoWarnings = [existingProviders.error, existingCamps.error].filter(Boolean) as string[];
     if (repoWarnings.length) setWarnings((current) => [...current, ...repoWarnings.map((warning) => `Duplicate check warning: ${warning}`)]);
   }
 
   function updateProvider(index: number, field: keyof DiscoveryProvider, value: string | boolean | number) { setProviders((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row)); }
-  function updateCamp(index: number, field: keyof DiscoveryCamp, value: string | boolean | number) { setCamps((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row)); }
-  function bulkUpdateCamps(indexes: number[], selected: boolean) { const indexSet = new Set(indexes); setCamps((rows) => rows.map((row, rowIndex) => indexSet.has(rowIndex) ? { ...row, selected } : row)); }
-  function downloadCsv() { downloadTextFile("discovery-assistant-export.csv", recordsToCsv([...providers, ...camps]), "text/csv;charset=utf-8"); }
+  function updateCamp(index: number, field: keyof DiscoveryCamp, value: string | boolean | number) {
+    const currentCamp = camps[index];
+    if (!currentCamp) return;
+    const currentKey = campStableKey(currentCamp);
+    if (field === "selected") {
+      setSelectedCampKeys((keys) => { const next = new Set(keys); if (value) next.add(currentKey); else next.delete(currentKey); return next; });
+      return;
+    }
+    const updatedCamp = { ...currentCamp, [field]: value };
+    const nextKey = campStableKey(updatedCamp);
+    setCamps((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
+    if (currentKey !== nextKey) setSelectedCampKeys((keys) => { if (!keys.has(currentKey)) return keys; const next = new Set(keys); next.delete(currentKey); next.add(nextKey); return next; });
+  }
+  function bulkUpdateCamps(keys: string[], selected: boolean) { setSelectedCampKeys((current) => { const next = new Set(current); for (const key of keys) { if (selected) next.add(key); else next.delete(key); } return next; }); }
+  function removeCamp(index: number) { const key = campStableKey(camps[index]); setCamps((rows) => rows.filter((_, rowIndex) => rowIndex !== index)); setSelectedCampKeys((keys) => { const next = new Set(keys); next.delete(key); return next; }); }
+  function downloadCsv() { downloadTextFile("discovery-assistant-export.csv", recordsToCsv([...providers, ...campsWithSelection]), "text/csv;charset=utf-8"); }
   async function importSelected() { const [providerResult, campResult] = await Promise.all([selectedProviders.length ? upsertProviders(selectedProviders.map(asImportProvider)) : Promise.resolve({ data: [], error: null }), selectedCamps.length ? upsertCamps(selectedCamps.map(asImportCamp)) : Promise.resolve({ data: [], error: null })]); setImportSummary(`Imported ${providerResult.data.length} provider(s) and ${campResult.data.length} camp(s). ${[providerResult.error, campResult.error].filter(Boolean).join(" ")}`); }
 
   return <main className="app-shell"><header className="hero"><div><p className="eyebrow">Internal admin · draft discovery</p><h1>Discovery Assistant</h1><p>Analyse provider and camp pages, review deterministic draft records, then import selected unverified drafts.</p></div><div className="hero-actions"><Link className="button-link" href="/">Dashboard</Link></div></header>
@@ -192,10 +210,10 @@ export function DiscoveryAssistant() {
     <section className="stats-grid"><article><span>Source URL analysed</span><strong>{form.sourceUrl || "—"}</strong></article><article><span>Text extracted length</span><strong>{pageText.length + Object.values(manualPages).reduce((sum, page) => sum + page.text.length, 0)}</strong></article><article><span>Possible providers</span><strong>{providers.length}</strong></article><article><span>Unique camp schedules found</span><strong>{camps.length}</strong></article></section>
     <AnalysisLogPanel log={analysisLog} pages={pageAnalyses} activeManualUrl={activeManualUrl} manualDraft={manualDraft} onPaste={(url) => { setActiveManualUrl(url); setManualDraft(manualPages[url]?.text ?? ""); }} onDraftChange={setManualDraft} onSubmitManual={submitManualPage} />
     {developerDebug ? <DeveloperExtractionDebug items={debugItems} sourceUrl={form.sourceUrl} analysisLog={analysisLog} pages={pageAnalyses} debugCounts={debugCounts} /> : null}
-    <ExtractionSummary providers={providers} camps={camps} warnings={warnings} />
+    <ExtractionSummary providers={providers} camps={campsWithSelection} warnings={warnings} />
     <ReviewTable title="Providers" fields={providerFields} rows={providers} update={updateProvider} remove={(index) => setProviders((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
-    <CampCards camps={camps} update={updateCamp} bulkUpdate={bulkUpdateCamps} remove={(index) => setCamps((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
-    <details className="panel"><summary>Advanced spreadsheet view</summary><ReviewTable title="Camps" fields={campFields} rows={camps} update={updateCamp} remove={(index) => setCamps((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} /></details>
+    <CampCards camps={campsWithSelection} update={updateCamp} bulkUpdate={bulkUpdateCamps} remove={removeCamp} />
+    <details className="panel"><summary>Advanced spreadsheet view</summary><ReviewTable title="Camps" fields={campFields} rows={campsWithSelection} update={updateCamp} remove={removeCamp} /></details>
     <section className="panel"><div className="form-actions"><button type="button" className="secondary" onClick={downloadCsv} disabled={!providers.length && !camps.length}>Export CSV</button><button type="button" onClick={importSelected} disabled={!selectedProviders.length && !selectedCamps.length}>Import selected drafts</button></div>{importSummary ? <p>{importSummary}</p> : null}</section></main>;
 }
 
@@ -245,10 +263,10 @@ function campMatchesFilters(camp: DiscoveryCamp, filters: CampReviewFilters) {
   return true;
 }
 
-function CampCards({ camps, update, bulkUpdate, remove }: { camps: DiscoveryCamp[]; update: (index: number, field: keyof DiscoveryCamp, value: string | boolean | number) => void; bulkUpdate: (indexes: number[], selected: boolean) => void; remove: (index: number) => void }) {
+function CampCards({ camps, update, bulkUpdate, remove }: { camps: DiscoveryCamp[]; update: (index: number, field: keyof DiscoveryCamp, value: string | boolean | number) => void; bulkUpdate: (keys: string[], selected: boolean) => void; remove: (index: number) => void }) {
   const [filters, setFilters] = useState<CampReviewFilters>(blankCampReviewFilters);
   const visibleCamps = useMemo(() => camps.map((camp, index) => ({ camp, index })).filter(({ camp }) => campMatchesFilters(camp, filters)), [camps, filters]);
-  const visibleIndexes = visibleCamps.map(({ index }) => index);
+  const visibleKeys = visibleCamps.map(({ camp }) => campStableKey(camp));
   const selectedCount = camps.filter((camp) => camp.selected).length;
   const needsReviewCount = camps.filter((camp) => camp.needs_review).length;
   const selectedByCountyCount = filters.county ? camps.filter((camp) => camp.county === filters.county && camp.selected).length : 0;
@@ -260,7 +278,7 @@ function CampCards({ camps, update, bulkUpdate, remove }: { camps: DiscoveryCamp
     activityTypes: uniqueOptions(camps.map((camp) => camp.activity_type)),
   }), [camps]);
   const updateFilter = (field: keyof CampReviewFilters) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setFilters((current) => ({ ...current, [field]: event.target.value }));
-  const countyIndexes = (county: string) => camps.map((camp, index) => ({ camp, index })).filter(({ camp }) => camp.county === county).map(({ index }) => index);
+  const countyKeys = (county: string) => camps.filter((camp) => camp.county === county).map(campStableKey);
 
   return <section className="panel"><h2>Camp review cards</h2>{camps.length === 0 ? <p className="empty-state">No high-confidence camp offerings found. Generic navigation items are ignored.</p> : <>
     <div className="review-filter-panel"><h3>Review filters</h3><div className="review-filter-grid">
@@ -276,7 +294,7 @@ function CampCards({ camps, update, bulkUpdate, remove }: { camps: DiscoveryCamp
       <label>Confidence threshold<input type="number" min="0" max="100" value={filters.confidence} onChange={updateFilter("confidence")} placeholder="Minimum %" /></label>
       <label>Source method<select value={filters.sourceMethod} onChange={updateFilter("sourceMethod")}><option value="">Any source</option><option value="crawler">Crawled</option><option value="manual_paste">Manual</option></select></label>
       <label className="review-search">Search<input value={filters.search} onChange={updateFilter("search")} placeholder="Name, town, county, venue, booking URL" /></label>
-    </div><div className="summary-pills review-counts"><span>{camps.length} total schedules</span><span>{visibleCamps.length} visible</span><span>{selectedCount} selected</span><span>{camps.length - visibleCamps.length} hidden by filters</span><span>{needsReviewCount} needs review</span>{filters.county ? <span>{selectedByCountyCount} selected in {filters.county}</span> : null}</div><div className="form-actions review-bulk-actions"><button type="button" className="secondary" onClick={() => bulkUpdate(visibleIndexes, true)}>Select all visible</button><button type="button" className="secondary" onClick={() => bulkUpdate(visibleIndexes, false)}>Deselect all visible</button><button type="button" className="secondary" onClick={() => bulkUpdate(camps.map((_, index) => index), true)}>Select all</button><button type="button" className="secondary" onClick={() => bulkUpdate(camps.map((_, index) => index), false)}>Deselect all</button><button type="button" className="secondary" onClick={() => filters.county && bulkUpdate(countyIndexes(filters.county), true)} disabled={!filters.county}>Select by county</button><button type="button" className="secondary" onClick={() => filters.county && bulkUpdate(countyIndexes(filters.county), false)} disabled={!filters.county}>Deselect by county</button><button type="button" className="secondary" onClick={() => setFilters(blankCampReviewFilters)}>Clear filters</button></div></div>
+    </div><div className="summary-pills review-counts"><span>{camps.length} total schedules</span><span>{visibleCamps.length} visible</span><span>{selectedCount} selected</span><span>{camps.length - visibleCamps.length} hidden by filters</span><span>{needsReviewCount} needs review</span>{filters.county ? <span>{selectedByCountyCount} selected in {filters.county}</span> : null}</div><div className="form-actions review-bulk-actions"><button type="button" className="secondary" onClick={() => bulkUpdate(visibleKeys, true)}>Select all visible</button><button type="button" className="secondary" onClick={() => bulkUpdate(visibleKeys, false)}>Deselect all visible</button><button type="button" className="secondary" onClick={() => bulkUpdate(camps.map(campStableKey), true)}>Select all</button><button type="button" className="secondary" onClick={() => bulkUpdate(camps.map(campStableKey), false)}>Deselect all</button><button type="button" className="secondary" onClick={() => filters.county && bulkUpdate(countyKeys(filters.county), true)} disabled={!filters.county}>Select by county</button><button type="button" className="secondary" onClick={() => filters.county && bulkUpdate(countyKeys(filters.county), false)} disabled={!filters.county}>Deselect by county</button><button type="button" className="secondary" onClick={() => setFilters(blankCampReviewFilters)}>Clear filters</button></div></div>
     {visibleCamps.length === 0 ? <p className="empty-state">No camp cards match the active review filters.</p> : <div className="camp-review-grid">{visibleCamps.map(({ camp, index }) => <article className="camp-review-card" key={`${camp.camp_id}-${index}`}><div className="camp-card-header"><label className="checkbox-row"><input type="checkbox" checked={camp.selected} onChange={(event) => update(index, "selected", event.target.checked)} /> Select</label><span className="badge">{methodBadge(camp.source_method)}</span><ConfidenceBadge score={camp.confidence} /></div><h3>{camp.camp_name}</h3><div className="review-fields"><ReviewItem label="Location" value={[camp.town, camp.county].filter(Boolean).join(", ") || "—"} confidence={Math.max(camp.fieldConfidence.town ?? 0, camp.fieldConfidence.county ?? 0)} /><ReviewItem label="Dates" value={[camp.start_date, camp.end_date].filter(Boolean).join(" - ") || "—"} confidence={camp.fieldConfidence.start_date ?? 0} /><ReviewItem label="Age" value={camp.age_min || camp.age_max ? `${camp.age_min || "?"}-${camp.age_max || "?"}` : "—"} confidence={camp.fieldConfidence.age ?? 0} /><ReviewItem label="Price" value={camp.price || "—"} confidence={camp.fieldConfidence.price ?? 0} /><ReviewItem label="Activity" value={camp.activity_type || "—"} confidence={camp.fieldConfidence.activity_type ?? 0} /><ReviewItem label="Booking" value={camp.booking_url || "—"} confidence={camp.fieldConfidence.booking_url ?? 0} /></div>{camp.extractionWarnings.length || camp.duplicateWarnings.length ? <div className="warning-box compact"><strong>Warnings</strong>{[...camp.duplicateWarnings, ...camp.extractionWarnings].map((warning) => <small key={warning}>⚠ {warning}</small>)}</div> : null}<details><summary>Edit</summary><div className="edit-form card-edit">{campFields.map((field) => { const value = camp[field]; const checkbox = typeof value === "boolean"; return <label key={String(field)}>{label(String(field))}{checkbox ? <input type="checkbox" checked={Boolean(value)} onChange={(event) => update(index, field, event.target.checked)} /> : <input value={String(value ?? "")} onChange={(event) => update(index, field, field === "age_min" || field === "age_max" || field === "confidence" ? Number(event.target.value) : event.target.value)} />}</label>; })}</div></details><button type="button" className="secondary" onClick={() => remove(index)}>Delete</button></article>)}</div>}</>}</section>;
 }
 
