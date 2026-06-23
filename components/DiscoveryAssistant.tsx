@@ -21,7 +21,7 @@ const campFields: Array<keyof DiscoveryCamp> = ["selected", "needs_review", "cam
 function label(field: string) { return field.replaceAll("_", " "); }
 function uniqueOptions(values: string[]) { return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)); }
 function normalizedIncludes(value: string | number | boolean | undefined, search: string) { return String(value ?? "").toLowerCase().includes(search.trim().toLowerCase()); }
-function campStableKey(camp: Pick<DiscoveryCamp, "camp_id" | "provider_id" | "camp_name" | "town" | "start_date" | "end_date" | "booking_url">) { return camp.camp_id?.trim() || [camp.provider_id, camp.camp_name, camp.town, camp.start_date, camp.end_date, camp.booking_url].map((value) => String(value ?? "").trim().toLowerCase()).join("|"); }
+function campStableKey(camp: Pick<DiscoveryCamp, "camp_id" | "provider_id" | "camp_name" | "town" | "start_date" | "end_date" | "booking_url">) { return [camp.camp_id, camp.provider_id, camp.camp_name, camp.town, camp.start_date, camp.end_date, camp.booking_url].map((value) => String(value ?? "").trim().toLowerCase()).join("|"); }
 function methodBadge(method: DiscoveryProvider["source_method"] | DiscoveryCamp["source_method"]) { return method === "manual_paste" ? "📋 Manual" : "🕷 Crawled"; }
 function asImportProvider(provider: DiscoveryProvider): Provider { const { selected, needs_review, duplicateWarnings, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = provider; return { ...row, status: "draft", verified: false, featured: false }; }
 const developerDebug = true;
