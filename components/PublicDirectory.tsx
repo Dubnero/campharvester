@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { loadStoredCamps } from "@/lib/campStorage";
 import { loadStoredProviders } from "@/lib/providerStorage";
@@ -10,6 +9,7 @@ import {
   filterPublicCamps,
   formatAgeRange,
   formatDateRange,
+  formatTimeRange,
   getUniquePublicValues,
   sortPublicCamps,
   type PublicFilters,
@@ -21,14 +21,27 @@ type Props = { initialCamps: Camp[]; initialProviders: Provider[] };
 
 type FilterChip = { key: keyof PublicFilters; label: string };
 
-const initialFilters: PublicFilters = { search: "", county: "", town: "", activity: "", holiday: "", age: "" };
-const ageOptions = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16+"];
+const initialFilters: PublicFilters = {
+  search: "",
+  county: "",
+  town: "",
+  activity: "",
+  holiday: "",
+  age: "",
+  startDate: "",
+  endDate: "",
+  dayLength: "",
+  priceStatus: "",
+  verifiedOnly: false,
+  featuredOnly: false,
+};
+const ageOptions = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"];
 
 export function PublicDirectory({ initialCamps, initialProviders }: Props) {
   const [camps, setCamps] = useState(initialCamps);
   const [providers, setProviders] = useState(initialProviders);
   const [filters, setFilters] = useState(initialFilters);
-  const [sort, setSort] = useState<PublicSort>("soonest");
+  const [sort, setSort] = useState<PublicSort>("start-date");
   const [isLoading, setIsLoading] = useState(true);
   const [dataSource, setDataSource] = useState("Loading directory data…");
 
@@ -71,16 +84,22 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
     if (filters.holiday) chips.push({ key: "holiday", label: filters.holiday });
     if (filters.age) chips.push({ key: "age", label: `Age ${filters.age}` });
     if (filters.activity) chips.push({ key: "activity", label: filters.activity });
+    if (filters.startDate) chips.push({ key: "startDate", label: `From ${filters.startDate}` });
+    if (filters.endDate) chips.push({ key: "endDate", label: `To ${filters.endDate}` });
+    if (filters.dayLength) chips.push({ key: "dayLength", label: filters.dayLength });
+    if (filters.priceStatus) chips.push({ key: "priceStatus", label: filters.priceStatus === "present" ? "Price shown" : "Price missing" });
+    if (filters.verifiedOnly) chips.push({ key: "verifiedOnly", label: "Verified only" });
+    if (filters.featuredOnly) chips.push({ key: "featuredOnly", label: "Featured only" });
     return chips;
   }, [filters]);
   const hasActiveFilters = activeChips.length > 0;
 
-  function updateFilter(key: keyof PublicFilters, value: string) {
+  function updateFilter(key: keyof PublicFilters, value: string | boolean) {
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
   function clearFilter(key: keyof PublicFilters) {
-    updateFilter(key, "");
+    updateFilter(key, typeof initialFilters[key] === "boolean" ? false : "");
   }
 
   function clearAllFilters() {
@@ -108,6 +127,12 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
           <label>Activity<select value={filters.activity} onChange={(event) => updateFilter("activity", event.target.value)}><option value="">All activities</option>{activities.map((activity) => <option key={activity}>{activity}</option>)}</select></label>
           <label>Holiday<select value={filters.holiday} onChange={(event) => updateFilter("holiday", event.target.value)}><option value="">All holidays</option>{holidays.map((holiday) => <option key={holiday}>{holiday}</option>)}</select></label>
           <label>Child age<select value={filters.age} onChange={(event) => updateFilter("age", event.target.value)}><option value="">Any age</option>{ageOptions.map((age) => <option key={age}>{age}</option>)}</select></label>
+          <label>Start date from<input type="date" value={filters.startDate} onChange={(event) => updateFilter("startDate", event.target.value)} /></label>
+          <label>Start date to<input type="date" value={filters.endDate} onChange={(event) => updateFilter("endDate", event.target.value)} /></label>
+          <label>Half-day / full-day<select value={filters.dayLength} onChange={(event) => updateFilter("dayLength", event.target.value)}><option value="">Any length</option><option>Half day</option><option>Full day</option><option>Both</option><option>Unknown</option></select></label>
+          <label>Price<select value={filters.priceStatus} onChange={(event) => updateFilter("priceStatus", event.target.value)}><option value="">Any price status</option><option value="present">Price present</option><option value="missing">Price missing</option></select></label>
+          <label className="checkbox-row public-checkbox"><input type="checkbox" checked={filters.verifiedOnly} onChange={(event) => updateFilter("verifiedOnly", event.target.checked)} /> Verified only</label>
+          <label className="checkbox-row public-checkbox"><input type="checkbox" checked={filters.featuredOnly} onChange={(event) => updateFilter("featuredOnly", event.target.checked)} /> Featured only</label>
         </div>
         {hasActiveFilters && (
           <div className="active-filter-row" aria-label="Active filters">
@@ -123,8 +148,8 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
 
       <section className="directory-results" aria-live="polite">
         <div className="directory-heading">
-          <div><h2>{filteredCamps.length} camps found</h2><p>Listings update automatically when new camp data is imported.</p></div>
-          <label className="sort-control">Sort by<select value={sort} onChange={(event) => setSort(event.target.value as PublicSort)}><option value="soonest">Soonest start date</option><option value="price-asc">Price low to high</option><option value="price-desc">Price high to low</option><option value="age-youngest">Age youngest first</option><option value="age-oldest">Age oldest first</option></select></label>
+          <div><h2>Showing {filteredCamps.length} of {publicCamps.length} camp schedules</h2><p>Listings update automatically when new camp data is imported.</p></div>
+          <label className="sort-control">Sort by<select value={sort} onChange={(event) => setSort(event.target.value as PublicSort)}><option value="start-date">Start date earliest first</option><option value="price-asc">Price low to high</option><option value="town-az">Town A-Z</option><option value="provider-az">Provider A-Z</option></select></label>
         </div>
         {sortedCamps.length > 0 ? (
           <div className="camp-card-grid">
@@ -135,18 +160,24 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
                   <h3>{camp.camp_name}</h3>
                   <p className="provider-name">{camp.provider?.provider_name ?? "Provider details coming soon"}</p>
                   <p className="location-line">{camp.town}, {camp.county}</p>
+                  {camp.address ? <p className="address-line">{camp.address}</p> : null}
+                  <div className="flags">
+                    {camp.verified || camp.provider?.verified ? <span className="flag verified">Verified</span> : null}
+                    {camp.featured || camp.provider?.featured ? <span className="flag featured">Featured</span> : null}
+                  </div>
                 </div>
                 <dl className="camp-card-meta">
                   <div><dt>Dates</dt><dd>{formatDateRange(camp.start_date, camp.end_date)}</dd></div>
+                  <div><dt>Times</dt><dd>{formatTimeRange(camp.start_time, camp.end_time)} · {camp.half_day_or_full_day}</dd></div>
                   <div><dt>Ages</dt><dd>{formatAgeRange(camp.age_min, camp.age_max)}</dd></div>
                   <div><dt>Price</dt><dd>{camp.price || "Price to be confirmed"}</dd></div>
                 </dl>
-                <Link className="button-link" href={`/camps/${camp.publicSlug}`}>View details</Link>
+                {camp.booking_url ? <a className="button-link" href={camp.booking_url} target="_blank" rel="noreferrer">View / book camp</a> : null}
               </article>
             ))}
           </div>
         ) : (
-          <div className="public-empty-state"><p>No camps found. Try removing a filter or searching a nearby town.</p><button type="button" onClick={clearAllFilters}>Clear filters</button></div>
+          <div className="public-empty-state"><p>No camps match those filters yet. Try clearing one or two filters.</p><button type="button" onClick={clearAllFilters}>Clear filters</button></div>
         )}
       </section>
     </main>
