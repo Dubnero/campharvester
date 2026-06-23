@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useMemo, useState } from "react";
 import { getCamps, getProviders, upsertCamps, upsertProviders } from "@/lib/dataRepository";
 import { DiscoveryCamp, DiscoveryPageAnalysis, DiscoveryProvider, ExtractionPipelineDebug, buildExtractionDebug, dedupeDiscoveryCamps, extractDiscoveryRecords, recordsToCsv } from "@/lib/discoveryUtils";
 import type { Camp, Provider } from "@/lib/types";
@@ -11,12 +11,16 @@ type AnalysisLog = { sourceUrl: string; discoveredUrls: string[]; crawledUrls: s
 type ManualPage = { url: string; text: string };
 type DebugCounts = { productPagesCrawled: number; rawCampRecordsExtracted: number; uniqueCampSchedulesAfterDedupe: number; duplicateCampRecordsRemoved: number };
 type DebugExportPayload = { sourceUrl: string; generatedAt: string; crawlMetrics: AnalysisLog | null; urlStatus: DiscoveryPageAnalysis[]; pagesCrawled: string[]; debugCounts: DebugCounts; productUrls: { discovered: string[]; crawled: string[]; skipped: Array<{ url: string; reason: string }>; skipped_product_urls_due_to_limit: string[] }; debugItems: ExtractionPipelineDebug[] };
+type CampReviewFilters = { county: string; town: string; provider: string; holidayType: string; activityType: string; startDate: string; endDate: string; priceStatus: "" | "present" | "missing"; needsReview: "" | "yes" | "no"; confidence: string; sourceMethod: "" | "crawler" | "manual_paste"; search: string };
 const blankForm: FormState = { sourceUrl: "", providerId: "", providerName: "", county: "", activityType: "", holidayType: "", notes: "" };
 const blankDebugCounts: DebugCounts = { productPagesCrawled: 0, rawCampRecordsExtracted: 0, uniqueCampSchedulesAfterDedupe: 0, duplicateCampRecordsRemoved: 0 };
+const blankCampReviewFilters: CampReviewFilters = { county: "", town: "", provider: "", holidayType: "", activityType: "", startDate: "", endDate: "", priceStatus: "", needsReview: "", confidence: "", sourceMethod: "", search: "" };
 const providerFields: Array<keyof DiscoveryProvider> = ["selected", "needs_review", "confidence", "provider_id", "provider_name", "website", "primary_email", "primary_phone", "primary_county", "activity_category", "provider_type", "status"];
 const campFields: Array<keyof DiscoveryCamp> = ["selected", "needs_review", "camp_id", "provider_id", "camp_name", "county", "town", "address", "eircode", "activity_type", "holiday_type", "age_min", "age_max", "start_date", "end_date", "start_time", "end_time", "half_day_or_full_day", "price", "booking_url", "status"];
 
 function label(field: string) { return field.replaceAll("_", " "); }
+function uniqueOptions(values: string[]) { return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)); }
+function normalizedIncludes(value: string | number | boolean | undefined, search: string) { return String(value ?? "").toLowerCase().includes(search.trim().toLowerCase()); }
 function methodBadge(method: DiscoveryProvider["source_method"] | DiscoveryCamp["source_method"]) { return method === "manual_paste" ? "📋 Manual" : "🕷 Crawled"; }
 function asImportProvider(provider: DiscoveryProvider): Provider { const { selected, needs_review, duplicateWarnings, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = provider; return { ...row, status: "draft", verified: false, featured: false }; }
 const developerDebug = true;
@@ -179,6 +183,7 @@ export function DiscoveryAssistant() {
 
   function updateProvider(index: number, field: keyof DiscoveryProvider, value: string | boolean | number) { setProviders((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row)); }
   function updateCamp(index: number, field: keyof DiscoveryCamp, value: string | boolean | number) { setCamps((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row)); }
+  function bulkUpdateCamps(indexes: number[], selected: boolean) { const indexSet = new Set(indexes); setCamps((rows) => rows.map((row, rowIndex) => indexSet.has(rowIndex) ? { ...row, selected } : row)); }
   function downloadCsv() { downloadTextFile("discovery-assistant-export.csv", recordsToCsv([...providers, ...camps]), "text/csv;charset=utf-8"); }
   async function importSelected() { const [providerResult, campResult] = await Promise.all([selectedProviders.length ? upsertProviders(selectedProviders.map(asImportProvider)) : Promise.resolve({ data: [], error: null }), selectedCamps.length ? upsertCamps(selectedCamps.map(asImportCamp)) : Promise.resolve({ data: [], error: null })]); setImportSummary(`Imported ${providerResult.data.length} provider(s) and ${campResult.data.length} camp(s). ${[providerResult.error, campResult.error].filter(Boolean).join(" ")}`); }
 
@@ -189,7 +194,7 @@ export function DiscoveryAssistant() {
     {developerDebug ? <DeveloperExtractionDebug items={debugItems} sourceUrl={form.sourceUrl} analysisLog={analysisLog} pages={pageAnalyses} debugCounts={debugCounts} /> : null}
     <ExtractionSummary providers={providers} camps={camps} warnings={warnings} />
     <ReviewTable title="Providers" fields={providerFields} rows={providers} update={updateProvider} remove={(index) => setProviders((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
-    <CampCards camps={camps} update={updateCamp} remove={(index) => setCamps((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
+    <CampCards camps={camps} update={updateCamp} bulkUpdate={bulkUpdateCamps} remove={(index) => setCamps((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
     <details className="panel"><summary>Advanced spreadsheet view</summary><ReviewTable title="Camps" fields={campFields} rows={camps} update={updateCamp} remove={(index) => setCamps((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} /></details>
     <section className="panel"><div className="form-actions"><button type="button" className="secondary" onClick={downloadCsv} disabled={!providers.length && !camps.length}>Export CSV</button><button type="button" onClick={importSelected} disabled={!selectedProviders.length && !selectedCamps.length}>Import selected drafts</button></div>{importSummary ? <p>{importSummary}</p> : null}</section></main>;
 }
@@ -221,8 +226,58 @@ function ExtractionSummary({ providers, camps, warnings }: { providers: Discover
   return <section className="panel extraction-summary"><h2>Extraction Summary</h2><div className="summary-pills"><span>Provider confidence <ConfidenceBadge score={providerConfidence} /></span><span>{camps.length} unique camp schedules found</span></div>{summaryWarnings.length ? <div className="warning-box"><strong>Warnings</strong><ul>{Array.from(new Set(summaryWarnings)).map((warning) => <li key={warning}>⚠ {warning}</li>)}</ul></div> : null}</section>;
 }
 
-function CampCards({ camps, update, remove }: { camps: DiscoveryCamp[]; update: (index: number, field: keyof DiscoveryCamp, value: string | boolean | number) => void; remove: (index: number) => void }) {
-  return <section className="panel"><h2>Camp review cards</h2>{camps.length === 0 ? <p className="empty-state">No high-confidence camp offerings found. Generic navigation items are ignored.</p> : <div className="camp-review-grid">{camps.map((camp, index) => <article className="camp-review-card" key={`${camp.camp_id}-${index}`}><div className="camp-card-header"><label className="checkbox-row"><input type="checkbox" checked={camp.selected} onChange={(event) => update(index, "selected", event.target.checked)} /> Select</label><span className="badge">{methodBadge(camp.source_method)}</span><ConfidenceBadge score={camp.confidence} /></div><h3>{camp.camp_name}</h3><div className="review-fields"><ReviewItem label="Location" value={[camp.town, camp.county].filter(Boolean).join(", ") || "—"} confidence={Math.max(camp.fieldConfidence.town ?? 0, camp.fieldConfidence.county ?? 0)} /><ReviewItem label="Dates" value={[camp.start_date, camp.end_date].filter(Boolean).join(" - ") || "—"} confidence={camp.fieldConfidence.start_date ?? 0} /><ReviewItem label="Age" value={camp.age_min || camp.age_max ? `${camp.age_min || "?"}-${camp.age_max || "?"}` : "—"} confidence={camp.fieldConfidence.age ?? 0} /><ReviewItem label="Price" value={camp.price || "—"} confidence={camp.fieldConfidence.price ?? 0} /><ReviewItem label="Activity" value={camp.activity_type || "—"} confidence={camp.fieldConfidence.activity_type ?? 0} /><ReviewItem label="Booking" value={camp.booking_url || "—"} confidence={camp.fieldConfidence.booking_url ?? 0} /></div>{camp.extractionWarnings.length || camp.duplicateWarnings.length ? <div className="warning-box compact"><strong>Warnings</strong>{[...camp.duplicateWarnings, ...camp.extractionWarnings].map((warning) => <small key={warning}>⚠ {warning}</small>)}</div> : null}<details><summary>Edit</summary><div className="edit-form card-edit">{campFields.map((field) => { const value = camp[field]; const checkbox = typeof value === "boolean"; return <label key={String(field)}>{label(String(field))}{checkbox ? <input type="checkbox" checked={Boolean(value)} onChange={(event) => update(index, field, event.target.checked)} /> : <input value={String(value ?? "")} onChange={(event) => update(index, field, field === "age_min" || field === "age_max" || field === "confidence" ? Number(event.target.value) : event.target.value)} />}</label>; })}</div></details><button type="button" className="secondary" onClick={() => remove(index)}>Delete</button></article>)}</div>}</section>;
+function campMatchesFilters(camp: DiscoveryCamp, filters: CampReviewFilters) {
+  if (filters.county && camp.county !== filters.county) return false;
+  if (filters.town && camp.town !== filters.town) return false;
+  if (filters.provider && camp.provider_id !== filters.provider) return false;
+  if (filters.holidayType && camp.holiday_type !== filters.holidayType) return false;
+  if (filters.activityType && camp.activity_type !== filters.activityType) return false;
+  if (filters.startDate && (!camp.start_date || camp.start_date < filters.startDate)) return false;
+  if (filters.endDate && (!camp.end_date || camp.end_date > filters.endDate)) return false;
+  if (filters.priceStatus === "present" && !String(camp.price ?? "").trim()) return false;
+  if (filters.priceStatus === "missing" && String(camp.price ?? "").trim()) return false;
+  if (filters.needsReview === "yes" && !camp.needs_review) return false;
+  if (filters.needsReview === "no" && camp.needs_review) return false;
+  if (filters.confidence && camp.confidence < Number(filters.confidence)) return false;
+  if (filters.sourceMethod && camp.source_method !== filters.sourceMethod) return false;
+  const search = filters.search.trim().toLowerCase();
+  if (search && ![camp.camp_name, camp.town, camp.county, camp.address, camp.booking_url].some((value) => normalizedIncludes(value, search))) return false;
+  return true;
+}
+
+function CampCards({ camps, update, bulkUpdate, remove }: { camps: DiscoveryCamp[]; update: (index: number, field: keyof DiscoveryCamp, value: string | boolean | number) => void; bulkUpdate: (indexes: number[], selected: boolean) => void; remove: (index: number) => void }) {
+  const [filters, setFilters] = useState<CampReviewFilters>(blankCampReviewFilters);
+  const visibleCamps = useMemo(() => camps.map((camp, index) => ({ camp, index })).filter(({ camp }) => campMatchesFilters(camp, filters)), [camps, filters]);
+  const visibleIndexes = visibleCamps.map(({ index }) => index);
+  const selectedCount = camps.filter((camp) => camp.selected).length;
+  const needsReviewCount = camps.filter((camp) => camp.needs_review).length;
+  const selectedByCountyCount = filters.county ? camps.filter((camp) => camp.county === filters.county && camp.selected).length : 0;
+  const options = useMemo(() => ({
+    counties: uniqueOptions(camps.map((camp) => camp.county)),
+    towns: uniqueOptions(camps.map((camp) => camp.town)),
+    providers: uniqueOptions(camps.map((camp) => camp.provider_id)),
+    holidayTypes: uniqueOptions(camps.map((camp) => camp.holiday_type)),
+    activityTypes: uniqueOptions(camps.map((camp) => camp.activity_type)),
+  }), [camps]);
+  const updateFilter = (field: keyof CampReviewFilters) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setFilters((current) => ({ ...current, [field]: event.target.value }));
+  const countyIndexes = (county: string) => camps.map((camp, index) => ({ camp, index })).filter(({ camp }) => camp.county === county).map(({ index }) => index);
+
+  return <section className="panel"><h2>Camp review cards</h2>{camps.length === 0 ? <p className="empty-state">No high-confidence camp offerings found. Generic navigation items are ignored.</p> : <>
+    <div className="review-filter-panel"><h3>Review filters</h3><div className="review-filter-grid">
+      <label>County<select value={filters.county} onChange={updateFilter("county")}><option value="">All counties</option>{options.counties.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Town<select value={filters.town} onChange={updateFilter("town")}><option value="">All towns</option>{options.towns.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Provider<select value={filters.provider} onChange={updateFilter("provider")}><option value="">All providers</option>{options.providers.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Holiday type<select value={filters.holidayType} onChange={updateFilter("holidayType")}><option value="">All holiday types</option>{options.holidayTypes.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Activity type<select value={filters.activityType} onChange={updateFilter("activityType")}><option value="">All activity types</option>{options.activityTypes.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>Date from<input type="date" value={filters.startDate} onChange={updateFilter("startDate")} /></label>
+      <label>Date to<input type="date" value={filters.endDate} onChange={updateFilter("endDate")} /></label>
+      <label>Price<select value={filters.priceStatus} onChange={updateFilter("priceStatus")}><option value="">Any price status</option><option value="present">Price present</option><option value="missing">Price missing</option></select></label>
+      <label>Needs review<select value={filters.needsReview} onChange={updateFilter("needsReview")}><option value="">Any review status</option><option value="yes">Needs review</option><option value="no">Does not need review</option></select></label>
+      <label>Confidence threshold<input type="number" min="0" max="100" value={filters.confidence} onChange={updateFilter("confidence")} placeholder="Minimum %" /></label>
+      <label>Source method<select value={filters.sourceMethod} onChange={updateFilter("sourceMethod")}><option value="">Any source</option><option value="crawler">Crawled</option><option value="manual_paste">Manual</option></select></label>
+      <label className="review-search">Search<input value={filters.search} onChange={updateFilter("search")} placeholder="Name, town, county, venue, booking URL" /></label>
+    </div><div className="summary-pills review-counts"><span>{camps.length} total schedules</span><span>{visibleCamps.length} visible</span><span>{selectedCount} selected</span><span>{camps.length - visibleCamps.length} hidden by filters</span><span>{needsReviewCount} needs review</span>{filters.county ? <span>{selectedByCountyCount} selected in {filters.county}</span> : null}</div><div className="form-actions review-bulk-actions"><button type="button" className="secondary" onClick={() => bulkUpdate(visibleIndexes, true)}>Select all visible</button><button type="button" className="secondary" onClick={() => bulkUpdate(visibleIndexes, false)}>Deselect all visible</button><button type="button" className="secondary" onClick={() => bulkUpdate(camps.map((_, index) => index), true)}>Select all</button><button type="button" className="secondary" onClick={() => bulkUpdate(camps.map((_, index) => index), false)}>Deselect all</button><button type="button" className="secondary" onClick={() => filters.county && bulkUpdate(countyIndexes(filters.county), true)} disabled={!filters.county}>Select by county</button><button type="button" className="secondary" onClick={() => filters.county && bulkUpdate(countyIndexes(filters.county), false)} disabled={!filters.county}>Deselect by county</button><button type="button" className="secondary" onClick={() => setFilters(blankCampReviewFilters)}>Clear filters</button></div></div>
+    {visibleCamps.length === 0 ? <p className="empty-state">No camp cards match the active review filters.</p> : <div className="camp-review-grid">{visibleCamps.map(({ camp, index }) => <article className="camp-review-card" key={`${camp.camp_id}-${index}`}><div className="camp-card-header"><label className="checkbox-row"><input type="checkbox" checked={camp.selected} onChange={(event) => update(index, "selected", event.target.checked)} /> Select</label><span className="badge">{methodBadge(camp.source_method)}</span><ConfidenceBadge score={camp.confidence} /></div><h3>{camp.camp_name}</h3><div className="review-fields"><ReviewItem label="Location" value={[camp.town, camp.county].filter(Boolean).join(", ") || "—"} confidence={Math.max(camp.fieldConfidence.town ?? 0, camp.fieldConfidence.county ?? 0)} /><ReviewItem label="Dates" value={[camp.start_date, camp.end_date].filter(Boolean).join(" - ") || "—"} confidence={camp.fieldConfidence.start_date ?? 0} /><ReviewItem label="Age" value={camp.age_min || camp.age_max ? `${camp.age_min || "?"}-${camp.age_max || "?"}` : "—"} confidence={camp.fieldConfidence.age ?? 0} /><ReviewItem label="Price" value={camp.price || "—"} confidence={camp.fieldConfidence.price ?? 0} /><ReviewItem label="Activity" value={camp.activity_type || "—"} confidence={camp.fieldConfidence.activity_type ?? 0} /><ReviewItem label="Booking" value={camp.booking_url || "—"} confidence={camp.fieldConfidence.booking_url ?? 0} /></div>{camp.extractionWarnings.length || camp.duplicateWarnings.length ? <div className="warning-box compact"><strong>Warnings</strong>{[...camp.duplicateWarnings, ...camp.extractionWarnings].map((warning) => <small key={warning}>⚠ {warning}</small>)}</div> : null}<details><summary>Edit</summary><div className="edit-form card-edit">{campFields.map((field) => { const value = camp[field]; const checkbox = typeof value === "boolean"; return <label key={String(field)}>{label(String(field))}{checkbox ? <input type="checkbox" checked={Boolean(value)} onChange={(event) => update(index, field, event.target.checked)} /> : <input value={String(value ?? "")} onChange={(event) => update(index, field, field === "age_min" || field === "age_max" || field === "confidence" ? Number(event.target.value) : event.target.value)} />}</label>; })}</div></details><button type="button" className="secondary" onClick={() => remove(index)}>Delete</button></article>)}</div>}</>}</section>;
 }
 
 function ReviewItem({ label, value, confidence }: { label: string; value: string; confidence: number }) { return <div><span>{label}</span><strong>{value}</strong><ConfidenceBadge score={confidence} /></div>; }
