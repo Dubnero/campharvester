@@ -364,20 +364,29 @@ function parseStarcampTownVenue(value: string, fallbackTown: string) {
   return { town: titleCaseStarcampName(match[1].trim()), venue: cleanStarcampLocationText(match[2]) };
 }
 
+function isGenericStarcampLocation(value: string) {
+  return /\bstarcamp\b/i.test(value) || /\b(?:summer|easter|halloween|midterm|christmas)\s+camps?\b/i.test(value) || /^(?:camps?|camp locations?|locations?|nationwide)$/i.test(value.trim());
+}
+
 function cleanStarcampVenue(value: string) {
   return cleanStarcampLocationText(value).replace(/\b20\d{2}\b.*$/i, "").replace(/\b(?:book|price|ages?|date|week)\b.*$/i, "").replace(/[.。]+$/g, "").trim();
 }
 
 function starcampVenueCandidate(rawText: string, fallbackTown: string) {
-  if (!fallbackTown) return { candidate: "", venue: "" };
+  const lines = rawText.replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
+  for (const line of lines) {
+    const townVenue = parseStarcampTownVenue(line, "");
+    if (townVenue.town && townVenue.venue && !isGenericStarcampLocation(townVenue.town) && !isGenericStarcampLocation(townVenue.venue)) return { candidate: line, town: townVenue.town, venue: cleanStarcampVenue(townVenue.venue) };
+  }
+  if (!fallbackTown || isGenericStarcampLocation(fallbackTown)) return { candidate: "", town: "", venue: "" };
   const escapedTown = fallbackTown.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const townVenueMatch = rawText.match(new RegExp(`\\b${escapedTown}\\s*[-–—]\\s*([^\\n,|]+)`, "i"));
-  if (townVenueMatch) return { candidate: townVenueMatch[0], venue: cleanStarcampVenue(townVenueMatch[1]) };
+  if (townVenueMatch) return { candidate: townVenueMatch[0], town: fallbackTown, venue: cleanStarcampVenue(townVenueMatch[1]) };
   const starcampVenueMatch = rawText.match(new RegExp(`\\b${escapedTown}\\s+(?:summer|easter)\\s+camp,?\\s+STARCAMP\\s*[-–—]\\s*([^\\n,|]+)`, "i"));
-  if (starcampVenueMatch) return { candidate: starcampVenueMatch[0], venue: cleanStarcampVenue(starcampVenueMatch[1]) };
+  if (starcampVenueMatch) return { candidate: starcampVenueMatch[0], town: fallbackTown, venue: cleanStarcampVenue(starcampVenueMatch[1]) };
   const sentenceMatch = rawText.match(new RegExp(`will\\s+run\\s+a\\s+${escapedTown}\\s+(?:summer|easter)\\s+camp\\s+in\\s+([^\\n.]+)`, "i"));
-  if (sentenceMatch) return { candidate: sentenceMatch[0], venue: cleanStarcampVenue(sentenceMatch[1]) };
-  return { candidate: "", venue: "" };
+  if (sentenceMatch) return { candidate: sentenceMatch[0], town: fallbackTown, venue: cleanStarcampVenue(sentenceMatch[1]) };
+  return { candidate: "", town: "", venue: "" };
 }
 
 function extractStarcampLocation(rawText: string, fallbackTown: string) {
@@ -388,10 +397,11 @@ function extractStarcampLocation(rawText: string, fallbackTown: string) {
   const venueCandidate = starcampVenueCandidate(rawText, fallbackTown);
   const townVenue = parseStarcampTownVenue(venueLabel || titleLine, fallbackTown);
   const county = findKnown(rawText, counties);
-  const town = townVenue.town || findKnown(rawText, [...southDublinTowns, fallbackTown].filter(Boolean)) || fallbackTown;
+  const parsedTown = isGenericStarcampLocation(townVenue.town) ? "" : townVenue.town;
+  const town = venueCandidate.town || parsedTown || findKnown(rawText, [...southDublinTowns, fallbackTown].filter(Boolean).filter((value) => !isGenericStarcampLocation(value))) || (isGenericStarcampLocation(fallbackTown) ? "" : fallbackTown);
   const parsedAddress = townVenue.venue && townVenue.venue.toLowerCase() !== town.toLowerCase() ? townVenue.venue : cleanStarcampLocationText(venueLabel || titleLine);
-  const address = venueCandidate.venue && venueCandidate.venue.toLowerCase() !== town.toLowerCase() ? venueCandidate.venue : parsedAddress || town;
-  return { town, county, address, titleLine, fallbackTown, selectedLocationCandidate: venueCandidate.candidate || venueLabel || titleLine, parsedTown: townVenue.town, parsedVenue: venueCandidate.venue || townVenue.venue };
+  const address = venueCandidate.venue && venueCandidate.venue.toLowerCase() !== town.toLowerCase() ? venueCandidate.venue : isGenericStarcampLocation(parsedAddress) ? "" : parsedAddress || town;
+  return { town, county, address, titleLine, fallbackTown, selectedLocationCandidate: venueCandidate.candidate || venueLabel || titleLine, parsedTown, parsedVenue: venueCandidate.venue || townVenue.venue };
 }
 function extractStarcampCamps(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) {
   const providerName = "Starcamp";
