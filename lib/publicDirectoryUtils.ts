@@ -13,9 +13,15 @@ export type PublicFilters = {
   activity: string;
   holiday: string;
   age: string;
+  startDate: string;
+  endDate: string;
+  dayLength: string;
+  priceStatus: string;
+  verifiedOnly: boolean;
+  featuredOnly: boolean;
 };
 
-export type PublicSort = "soonest" | "price-asc" | "price-desc" | "age-youngest" | "age-oldest";
+export type PublicSort = "start-date" | "price-asc" | "town-az" | "provider-az";
 
 export function slugify(value: string) {
   return value
@@ -30,9 +36,18 @@ export function campPublicSlug(camp: Camp) {
   return `${base}-${camp.camp_id}`;
 }
 
+const hiddenPublicStatuses = new Set(["archived", "deleted", "inactive", "rejected", "hidden", "disabled", "cancelled", "canceled"]);
+
+export function isPublicEligibleCamp(camp: Camp) {
+  const status = String(camp.status ?? "").trim().toLowerCase();
+  return !hiddenPublicStatuses.has(status);
+}
+
 export function buildPublicCamps(camps: Camp[], providers: Provider[]): PublicCamp[] {
   const providerLookup = providersById(providers);
-  return camps.map((camp) => ({ ...camp, provider: providerLookup[camp.provider_id], publicSlug: campPublicSlug(camp) }));
+  return camps
+    .filter(isPublicEligibleCamp)
+    .map((camp) => ({ ...camp, provider: providerLookup[camp.provider_id], publicSlug: campPublicSlug(camp) }));
 }
 
 export function findPublicCamp(camps: PublicCamp[], campIdOrSlug: string) {
@@ -43,17 +58,42 @@ export function getUniquePublicValues(camps: PublicCamp[], key: keyof Pick<Camp,
   return Array.from(new Set(camps.map((camp) => String(camp[key]).trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 }
 
+function hasPrice(camp: PublicCamp) {
+  return camp.price.trim().length > 0;
+}
+
+function dateToTime(value: string) {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function overlapsDateRange(camp: PublicCamp, startDate: string, endDate: string) {
+  if (!startDate && !endDate) return true;
+
+  const selectedStart = dateToTime(startDate) ?? dateToTime(endDate);
+  const selectedEnd = dateToTime(endDate) ?? dateToTime(startDate);
+  const campStart = dateToTime(camp.start_date);
+  const campEnd = dateToTime(camp.end_date) ?? campStart;
+
+  if (selectedStart === null || selectedEnd === null || campStart === null || campEnd === null) return true;
+  return campStart <= selectedEnd && campEnd >= selectedStart;
+}
+
 export function filterPublicCamps(camps: PublicCamp[], filters: PublicFilters) {
   const search = filters.search.trim().toLowerCase();
-  const requestedAge = filters.age === "16+" ? 16 : Number(filters.age);
+  const requestedAge = Number(filters.age);
 
   return camps.filter((camp) => {
+    const providerVerified = Boolean(camp.verified || camp.provider?.verified);
+    const providerFeatured = Boolean(camp.featured || camp.provider?.featured);
     const matchesSearch = search
-      ? [camp.camp_name, camp.provider?.provider_name ?? "", camp.town, camp.county].some((value) =>
+      ? [camp.camp_name, camp.provider?.provider_name ?? "", camp.town, camp.county, camp.address, camp.activity_type].some((value) =>
           value.toLowerCase().includes(search),
         )
       : true;
     const matchesAge = filters.age ? Number.isFinite(requestedAge) && camp.age_min <= requestedAge && camp.age_max >= requestedAge : true;
+    const matchesPrice =
+      filters.priceStatus === "present" ? hasPrice(camp) : filters.priceStatus === "missing" ? !hasPrice(camp) : true;
 
     return (
       matchesSearch &&
@@ -61,7 +101,12 @@ export function filterPublicCamps(camps: PublicCamp[], filters: PublicFilters) {
       (!filters.town || camp.town === filters.town) &&
       (!filters.activity || camp.activity_type === filters.activity) &&
       (!filters.holiday || camp.holiday_type === filters.holiday) &&
-      matchesAge
+      (!filters.dayLength || camp.half_day_or_full_day === filters.dayLength) &&
+      (!filters.verifiedOnly || providerVerified) &&
+      (!filters.featuredOnly || providerFeatured) &&
+      matchesPrice &&
+      matchesAge &&
+      overlapsDateRange(camp, filters.startDate, filters.endDate)
     );
   });
 }
@@ -76,13 +121,16 @@ function priceValue(value: string) {
   return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
 }
 
+function providerName(camp: PublicCamp) {
+  return camp.provider?.provider_name ?? "";
+}
+
 export function sortPublicCamps(camps: PublicCamp[], sort: PublicSort) {
   return [...camps].sort((a, b) => {
-    if (sort === "price-asc") return priceValue(a.price) - priceValue(b.price) || a.camp_name.localeCompare(b.camp_name);
-    if (sort === "price-desc") return priceValue(b.price) - priceValue(a.price) || a.camp_name.localeCompare(b.camp_name);
-    if (sort === "age-youngest") return a.age_min - b.age_min || a.age_max - b.age_max || a.camp_name.localeCompare(b.camp_name);
-    if (sort === "age-oldest") return b.age_max - a.age_max || b.age_min - a.age_min || a.camp_name.localeCompare(b.camp_name);
-    return dateValue(a.start_date) - dateValue(b.start_date) || a.camp_name.localeCompare(b.camp_name);
+    if (sort === "price-asc") return priceValue(a.price) - priceValue(b.price) || a.town.localeCompare(b.town);
+    if (sort === "town-az") return a.town.localeCompare(b.town) || dateValue(a.start_date) - dateValue(b.start_date);
+    if (sort === "provider-az") return providerName(a).localeCompare(providerName(b)) || dateValue(a.start_date) - dateValue(b.start_date);
+    return dateValue(a.start_date) - dateValue(b.start_date) || a.town.localeCompare(b.town);
   });
 }
 
