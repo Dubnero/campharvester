@@ -36,10 +36,17 @@ export function campPublicSlug(camp: Camp) {
   return `${base}-${camp.camp_id}`;
 }
 
+const hiddenPublicStatuses = new Set(["archived", "deleted", "inactive", "rejected", "hidden", "disabled", "cancelled", "canceled"]);
+
+export function isPublicEligibleCamp(camp: Camp) {
+  const status = String(camp.status ?? "").trim().toLowerCase();
+  return !hiddenPublicStatuses.has(status);
+}
+
 export function buildPublicCamps(camps: Camp[], providers: Provider[]): PublicCamp[] {
   const providerLookup = providersById(providers);
   return camps
-    .filter((camp) => camp.status === "approved")
+    .filter(isPublicEligibleCamp)
     .map((camp) => ({ ...camp, provider: providerLookup[camp.provider_id], publicSlug: campPublicSlug(camp) }));
 }
 
