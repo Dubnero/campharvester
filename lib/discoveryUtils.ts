@@ -354,7 +354,7 @@ function cleanStarcampCampName(originalName: string, sourceUrl: string, holidayT
 }
 
 function cleanStarcampLocationText(value: string) {
-  return value.replace(/&amp;/gi, "&").replace(/^Starcamp\s*/i, "").replace(/\b(?:summer|easter)\s+camp\b.*$/i, "").replace(/^[-–—:,]+|[-–—:,]+$/g, "").replace(/\s{2,}/g, " ").trim();
+  return value.replace(/&amp;/gi, "&").replace(/^Starcamp\s*/i, "").replace(/\b(?:summer|easter)\s+camp\b.*$/i, "").replace(/\s*[-–—|:]\s*Starcamp\b.*$/i, "").replace(/^[-–—:,]+|[-–—:,]+$/g, "").replace(/\s{2,}/g, " ").trim();
 }
 
 function parseStarcampTownVenue(value: string, fallbackTown: string) {
@@ -366,7 +366,8 @@ function parseStarcampTownVenue(value: string, fallbackTown: string) {
 
 function extractStarcampLocation(rawText: string, fallbackTown: string) {
   const lines = rawText.replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
-  const titleLine = lines.find((line) => /^.{3,90}\s*[-–—]\s*.{3,90}$/.test(line) && !navigationReject.test(line)) ?? lines.find((line) => /\b(?:summer|easter)\s+camp\b/i.test(line) && !navigationReject.test(line)) ?? "";
+  const fallbackTownPattern = new RegExp(`\\b${fallbackTown.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+  const titleLine = lines.find((line) => fallbackTown && fallbackTownPattern.test(line) && /^.{3,90}\s*[-–—]\s*.{3,90}$/.test(line) && !navigationReject.test(line)) ?? lines.find((line) => /^.{3,90}\s*[-–—]\s*.{3,90}$/.test(line) && !navigationReject.test(line)) ?? lines.find((line) => /\b(?:summer|easter)\s+camp\b/i.test(line) && !navigationReject.test(line)) ?? "";
   const venueLabel = lines.find((line) => /(?:venue|location|camp location|address)\s*:/i.test(line))?.replace(/.*?(?:venue|location|camp location|address)\s*:\s*/i, "") ?? "";
   const townVenue = parseStarcampTownVenue(venueLabel || titleLine, fallbackTown);
   const county = findKnown(rawText, counties);
@@ -563,7 +564,7 @@ export function dedupeDiscoveryCamps(camps: DiscoveryCamp[]) {
 
 export function recordsToCsv(records: Array<Record<string, unknown>>) {
   if (records.length === 0) return "";
-  const headers = Object.keys(records[0]).filter((key) => !["selected", "needs_review", "duplicateWarnings", "fieldConfidence", "extractionWarnings", "confidence", "source_method"].includes(key));
+  const headers = Object.keys(records[0]).filter((key) => !["selected", "needs_review", "duplicateWarnings", "comparisonWarnings", "matchedExistingCamp", "fieldConfidence", "extractionWarnings", "confidence", "source_method"].includes(key));
   const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   return [headers.join(","), ...records.map((row) => headers.map((header) => escape(row[header])).join(","))].join("\n");
 }

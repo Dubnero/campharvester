@@ -10,7 +10,11 @@ type CrawlPage = { url: string; text: string; readableTextLength: number; candid
 type SkippedUrl = { url: string; reason: string };
 
 function htmlToText(html: string) {
-  return html
+  const metadataText = Array.from(html.matchAll(/<(?:title|meta|a|img)\b[^>]*(?:content|title|alt|aria-label)=["']([^"']+)["'][^>]*>|<title[^>]*>([\s\S]*?)<\/title>/gi))
+    .map((match) => match[1] ?? match[2] ?? "")
+    .filter(Boolean)
+    .join("\n");
+  const bodyText = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, "\n")
@@ -22,6 +26,7 @@ function htmlToText(html: string) {
     .replace(/&quot;/g, '"')
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  return `${metadataText}\n${bodyText}`.trim();
 }
 
 function extractLinks(html: string, baseUrl: string) {

@@ -53,7 +53,7 @@ function nextProviderId(existingProviders: Provider[], draftProviders: Discovery
   return `P${String((ids.length ? Math.max(...ids) : 0) + 1).padStart(4, "0")}`;
 }
 
-function asImportCamp(camp: DiscoveryCamp): Camp { const { selected, needs_review, duplicateWarnings, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = camp; return { ...row, status: "draft", verified: false, featured: false }; }
+function asImportCamp(camp: DiscoveryCamp): Camp { const { selected, needs_review, duplicateWarnings, comparisonWarnings, matchedExistingCamp, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = camp; return { ...row, status: "draft", verified: false, featured: false }; }
 function downloadTextFile(filename: string, text: string, type = "text/plain;charset=utf-8") { const url = URL.createObjectURL(new Blob([text], { type })); const link = document.createElement("a"); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url); }
 function debugHostSlug(sourceUrl: string) { try { return new URL(sourceUrl).hostname.replace(/^www\./, "").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "source"; } catch { return "source"; } }
 function debugTimestamp(date = new Date()) { const pad = (value: number) => String(value).padStart(2, "0"); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`; }
@@ -192,7 +192,7 @@ export function DiscoveryAssistant() {
       const updatedCamp = { ...camp, provider_id: providerId };
       const matchedExistingCamp = existingCamps.data.find((existing) => existing.camp_id === updatedCamp.camp_id || (existing.provider_id === updatedCamp.provider_id && existing.camp_name.toLowerCase() === updatedCamp.camp_name.toLowerCase() && existing.town.toLowerCase() === updatedCamp.town.toLowerCase() && existing.start_date === updatedCamp.start_date));
       const comparisonWarnings = matchedExistingCamp ? compareExistingCamp(matchedExistingCamp, updatedCamp) : [];
-      const duplicateWarnings = matchedExistingCamp ? [`Existing camp found: ${matchedExistingCamp.camp_id} / ${matchedExistingCamp.camp_name}`, ...comparisonWarnings.map((comparison) => comparison.warning)] : [];
+      const duplicateWarnings = matchedExistingCamp ? [`Existing camp found: ${matchedExistingCamp.camp_id} / ${matchedExistingCamp.camp_name}`, comparisonWarnings.length ? "" : "Existing camp found — no differences detected", ...comparisonWarnings.map((comparison) => comparison.warning)].filter(Boolean) : [];
       return { ...updatedCamp, duplicateWarnings, comparisonWarnings, matchedExistingCamp, selected: duplicateWarnings.length === 0 && updatedCamp.selected };
     });
     setProviders(flaggedProviders);
