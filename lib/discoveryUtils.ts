@@ -364,16 +364,34 @@ function parseStarcampTownVenue(value: string, fallbackTown: string) {
   return { town: titleCaseStarcampName(match[1].trim()), venue: cleanStarcampLocationText(match[2]) };
 }
 
+function cleanStarcampVenue(value: string) {
+  return cleanStarcampLocationText(value).replace(/\b20\d{2}\b.*$/i, "").replace(/\b(?:book|price|ages?|date|week)\b.*$/i, "").replace(/[.。]+$/g, "").trim();
+}
+
+function starcampVenueCandidate(rawText: string, fallbackTown: string) {
+  if (!fallbackTown) return { candidate: "", venue: "" };
+  const escapedTown = fallbackTown.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const townVenueMatch = rawText.match(new RegExp(`\\b${escapedTown}\\s*[-–—]\\s*([^\\n,|]+)`, "i"));
+  if (townVenueMatch) return { candidate: townVenueMatch[0], venue: cleanStarcampVenue(townVenueMatch[1]) };
+  const starcampVenueMatch = rawText.match(new RegExp(`\\b${escapedTown}\\s+(?:summer|easter)\\s+camp,?\\s+STARCAMP\\s*[-–—]\\s*([^\\n,|]+)`, "i"));
+  if (starcampVenueMatch) return { candidate: starcampVenueMatch[0], venue: cleanStarcampVenue(starcampVenueMatch[1]) };
+  const sentenceMatch = rawText.match(new RegExp(`will\\s+run\\s+a\\s+${escapedTown}\\s+(?:summer|easter)\\s+camp\\s+in\\s+([^\\n.]+)`, "i"));
+  if (sentenceMatch) return { candidate: sentenceMatch[0], venue: cleanStarcampVenue(sentenceMatch[1]) };
+  return { candidate: "", venue: "" };
+}
+
 function extractStarcampLocation(rawText: string, fallbackTown: string) {
   const lines = rawText.replace(/\r/g, "\n").split(/\n+/).map((line) => line.trim().replace(/\s{2,}/g, " ")).filter(Boolean);
   const fallbackTownPattern = new RegExp(`\\b${fallbackTown.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
   const titleLine = lines.find((line) => fallbackTown && fallbackTownPattern.test(line) && /^.{3,90}\s*[-–—]\s*.{3,90}$/.test(line) && !navigationReject.test(line)) ?? lines.find((line) => /^.{3,90}\s*[-–—]\s*.{3,90}$/.test(line) && !navigationReject.test(line)) ?? lines.find((line) => /\b(?:summer|easter)\s+camp\b/i.test(line) && !navigationReject.test(line)) ?? "";
   const venueLabel = lines.find((line) => /(?:venue|location|camp location|address)\s*:/i.test(line))?.replace(/.*?(?:venue|location|camp location|address)\s*:\s*/i, "") ?? "";
+  const venueCandidate = starcampVenueCandidate(rawText, fallbackTown);
   const townVenue = parseStarcampTownVenue(venueLabel || titleLine, fallbackTown);
   const county = findKnown(rawText, counties);
   const town = townVenue.town || findKnown(rawText, [...southDublinTowns, fallbackTown].filter(Boolean)) || fallbackTown;
-  const address = townVenue.venue && townVenue.venue.toLowerCase() !== town.toLowerCase() ? townVenue.venue : cleanStarcampLocationText(venueLabel || titleLine) || town;
-  return { town, county, address, titleLine };
+  const parsedAddress = townVenue.venue && townVenue.venue.toLowerCase() !== town.toLowerCase() ? townVenue.venue : cleanStarcampLocationText(venueLabel || titleLine);
+  const address = venueCandidate.venue && venueCandidate.venue.toLowerCase() !== town.toLowerCase() ? venueCandidate.venue : parsedAddress || town;
+  return { town, county, address, titleLine, fallbackTown, selectedLocationCandidate: venueCandidate.candidate || venueLabel || titleLine, parsedTown: townVenue.town, parsedVenue: venueCandidate.venue || townVenue.venue };
 }
 function extractStarcampCamps(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) {
   const providerName = "Starcamp";
@@ -414,7 +432,7 @@ function buildStarcampDebugCandidates(rawText: string, input: DiscoveryInput, so
   const listingRejected = isStarcampListingSourceUrl(input.sourceUrl) || !isStarcampProductSourceUrl(input.sourceUrl);
   return (dateRanges.length ? dateRanges : [{ label: "", startDate: "", endDate: "", priority: 0, source: "readable_text" as const }]).map((dateRange) => {
     const failures = [listingRejected ? "Starcamp listing/index pages are discovery-only; camps must come from /product/*-camp/ pages" : "", location.titleLine || location.town ? "" : "Missing camp_name", input.sourceUrl ? "" : "Missing booking_url", price ? "" : "Missing price", dateRange.startDate ? "" : "Missing start_date", dateRange.endDate ? "" : "Missing end_date", location.town || location.county ? "" : "Missing town or county"].filter(Boolean);
-    return { extractedText: `${location.titleLine || location.address} ${dateRange.label}`.trim(), parsedFields: { provider: "Starcamp", title: cleanedCampName, original_camp_name: originalCampName, cleaned_camp_name: cleanedCampName, holiday_type_source: holidayInfo.source, all_date_options_found: dateRanges.map((range) => range.label).join(", "), selected_default_date_option: selectedDefaultDateOption, camp_records_created_from_product: dateRanges.length, date_option_source: dateRange.source, date_options_rejected: "", matched_date: dateRange.label, start_date: dateRange.startDate, end_date: dateRange.endDate, price, matched_product_price: productPrice.price, price_source: productPrice.source, scoped_price_candidates: productPrice.scopedCandidates.join(", "), fallback_price_candidates: productPrice.fallbackCandidates.join(", "), raw_price_text_examples: productPrice.rawPriceTextExamples.join(", "), normalized_price_candidates: productPrice.normalizedPriceCandidates.join(", "), ignored_noise_price_matches: productPrice.ignored.join(", "), final_price_used: price, price_rejection_reason: productPrice.rejectionReason, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: location.address, town: location.town, county: location.county, booking_url: input.sourceUrl, source_method: sourceMethod, rejected_reason: failures.join(", ") }, confidence: failures.length ? 0 : 95, validationFailures: failures } satisfies ExtractionDebugCandidate;
+    return { extractedText: `${location.titleLine || location.address} ${dateRange.label}`.trim(), parsedFields: { provider: "Starcamp", title: cleanedCampName, original_camp_name: originalCampName, cleaned_camp_name: cleanedCampName, holiday_type_source: holidayInfo.source, all_date_options_found: dateRanges.map((range) => range.label).join(", "), selected_default_date_option: selectedDefaultDateOption, camp_records_created_from_product: dateRanges.length, date_option_source: dateRange.source, date_options_rejected: "", matched_date: dateRange.label, start_date: dateRange.startDate, end_date: dateRange.endDate, price, matched_product_price: productPrice.price, price_source: productPrice.source, scoped_price_candidates: productPrice.scopedCandidates.join(", "), fallback_price_candidates: productPrice.fallbackCandidates.join(", "), raw_price_text_examples: productPrice.rawPriceTextExamples.join(", "), normalized_price_candidates: productPrice.normalizedPriceCandidates.join(", "), ignored_noise_price_matches: productPrice.ignored.join(", "), final_price_used: price, price_rejection_reason: productPrice.rejectionReason, matched_age: ageRange.label, age_min: ageRange.ageMin, age_max: ageRange.ageMax, location: location.address, location_debug_product_url: input.sourceUrl, location_debug_fallback_town: location.fallbackTown, location_debug_selected_candidate: location.selectedLocationCandidate, location_debug_parsed_town: location.parsedTown, location_debug_parsed_venue_address: location.parsedVenue, location_debug_final_town: location.town, location_debug_final_address: location.address, town: location.town, county: location.county, booking_url: input.sourceUrl, source_method: sourceMethod, rejected_reason: failures.join(", ") }, confidence: failures.length ? 0 : 95, validationFailures: failures } satisfies ExtractionDebugCandidate;
   });
 }
 
