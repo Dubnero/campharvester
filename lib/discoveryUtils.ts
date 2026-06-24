@@ -365,7 +365,7 @@ function parseStarcampTownVenue(value: string, fallbackTown: string) {
 }
 
 function isGenericStarcampLocation(value: string) {
-  return /\bstarcamp\b/i.test(value) || /\b(?:summer|easter|halloween|midterm|christmas)\s+camps?\b/i.test(value) || /^(?:camps?|camp locations?|locations?|nationwide)$/i.test(value.trim());
+  return /\b(?:index|follow|max-image-preview|max-snippet|max-video-preview|robots|canonical|noindex|nofollow)\b/i.test(value) || /\bstarcamp\b/i.test(value) || /\b(?:summer|easter|halloween|midterm|christmas)\s+camps?\b/i.test(value) || /^(?:camps?|camp locations?|locations?|nationwide|max)$/i.test(value.trim());
 }
 
 function cleanStarcampVenue(value: string) {
