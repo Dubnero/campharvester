@@ -763,6 +763,12 @@ button:disabled:hover {
   margin-top: 0;
 }
 
+.trust-note {
+  font-size: 0.88rem;
+  line-height: 1.45;
+  max-width: 720px;
+}
+
 .camp-card {
   align-content: space-between;
 }

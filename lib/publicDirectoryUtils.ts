@@ -146,6 +146,39 @@ export function formatAgeRange(min: number, max: number) {
   return `${min}–${max} years`;
 }
 
+function cleanLocationPart(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeLocationPart(value: string) {
+  return cleanLocationPart(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+export function formatLocationLines(camp: Pick<Camp, "address" | "town" | "county">) {
+  const address = cleanLocationPart(camp.address);
+  const townCounty = [cleanLocationPart(camp.town), cleanLocationPart(camp.county)].filter(Boolean).join(", ");
+  const normalizedAddress = normalizeLocationPart(address);
+  const normalizedTown = normalizeLocationPart(camp.town);
+  const normalizedTownCounty = normalizeLocationPart(townCounty);
+
+  if (!address) return { primary: townCounty, secondary: "" };
+  if (normalizedAddress === normalizedTown || normalizedAddress === normalizedTownCounty) return { primary: townCounty, secondary: "" };
+  return { primary: address, secondary: townCounty };
+}
+
+export function formatPublicTimeDetails(startTime: string, endTime: string, dayLength: string) {
+  const cleanDayLength = dayLength === "Unknown" ? "" : dayLength.trim();
+  const hasStartAndEnd = Boolean(startTime && endTime);
+
+  if (hasStartAndEnd) return [`${startTime}–${endTime}`, cleanDayLength].filter(Boolean).join(" · ");
+  if (cleanDayLength) return `Times to be confirmed · ${cleanDayLength}`;
+  return "To be confirmed";
+}
+
+export function publicDayLengthLabel(dayLength: string) {
+  return dayLength === "Unknown" ? "Length to be confirmed" : dayLength;
+}
+
 export function formatTimeRange(startTime: string, endTime: string) {
   if (!startTime && !endTime) return "Times to be confirmed";
   if (!startTime) return `Until ${endTime}`;
