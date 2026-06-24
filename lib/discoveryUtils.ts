@@ -196,12 +196,74 @@ function juniorEinsteinsListingRows(rawText: string, input: DiscoveryInput) {
   }
   return rows;
 }
-function buildJuniorEinsteinsCamp(row: ReturnType<typeof juniorEinsteinsListingRows>[number], input: DiscoveryInput, sourceMethod: SourceMethod): DiscoveryCamp {
-  const holiday = juniorEinsteinsHoliday(`${row.title} ${row.dateRange.label}`, input.holidayType?.trim()); const time = parseTimeRange(row.title); const location = parseJuniorEinsteinsLocation(row.title, row.countyLabel); const age = parseAgeRange(row.title); const warnings = ["No price detected", age.ageMin ? "" : "Age requires review", row.matched ? "" : "Booking URL requires review"].filter(Boolean); const fieldConfidence = { camp_name: 96, county: location.county ? 92 : 0, town: location.town ? 90 : 0, address: location.address ? 82 : 0, eircode: 0, activity_type: 98, holiday_type: holiday !== "Other" ? 92 : 30, age: age.ageMin ? 85 : 0, start_date: 98, price: 0, booking_url: row.matched ? 90 : 55 };
-  return { camp_id: slugify(`junior-einsteins-${location.address || location.town}-${row.dateRange.startDate}`), provider_id: input.providerId?.trim() || "junior-einsteins-science-club", camp_name: juniorEinsteinsCampName(holiday), county: location.county, town: location.town, address: location.address, eircode: "", activity_type: "STEM", holiday_type: holiday, age_min: age.ageMin, age_max: age.ageMax, start_date: row.dateRange.startDate, end_date: row.dateRange.endDate, start_time: time.startTime, end_time: time.endTime, half_day_or_full_day: inferDayType(time.startTime, time.endTime), price: "", booking_url: row.bookingUrl, status: "draft", verified: false, featured: false, source_url: input.sourceUrl, last_checked: today(), selected: true, needs_review: warnings.length > 0, duplicateWarnings: [], confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 1, start_date: 3, price: 1, booking_url: 1, activity_type: 1 }), fieldConfidence, extractionWarnings: warnings, source_method: sourceMethod };
+
+function juniorEinsteinsSourceBlocks(rawText: string) {
+  const blocks = rawText.split(/(?:^|\n)\s*Source URL:\s*/).map((block, index) => {
+    if (index === 0) return { url: "", text: block.trim() };
+    const [urlLine = "", ...rest] = block.split(/\n/);
+    return { url: urlLine.trim(), text: rest.join("\n").trim() };
+  });
+  return blocks.filter((block) => block.url || block.text);
 }
-function extractJuniorEinsteinsCamps(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) { return juniorEinsteinsListingRows(rawText, input).map((row) => buildJuniorEinsteinsCamp(row, input, sourceMethod)); }
-function buildJuniorEinsteinsDebugCandidates(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) { const rows = juniorEinsteinsListingRows(rawText, input); return rows.map((row) => { const camp = buildJuniorEinsteinsCamp(row, input, sourceMethod); return { extractedText: `${row.dateRange.label} ${row.title}`, parsedFields: { provider_specific_extractor: "Junior Einsteins Science Club", listing_rows_detected: rows.length, valid_camp_rows_parsed: rows.length, rows_rejected_as_testimonials_blog_faq_generic: Math.max(0, juniorEinsteinsLines(rawText).filter((line) => /testimonial|faq|here we are|is there a science camp|parent/i.test(line)).length), event_urls_matched: rows.filter((item) => item.matched).length, rows_missing_price: rows.length, rows_missing_age: rows.filter((item) => !parseAgeRange(item.title).ageMin).length, title: camp.camp_name, start_date: camp.start_date, end_date: camp.end_date, matched_time: parseTimeRange(row.title).label, start_time: camp.start_time, end_time: camp.end_time, day_type: camp.half_day_or_full_day, price: camp.price, age_min: camp.age_min, age_max: camp.age_max, location: camp.address || camp.town, town: camp.town, county: camp.county, booking_url: camp.booking_url, source_method: sourceMethod }, confidence: camp.confidence, validationFailures: camp.extractionWarnings } satisfies ExtractionDebugCandidate; }); }
+function isJuniorEinsteinsEventUrl(value: string) {
+  try { const url = new URL(value); return /(^|\.)junioreinsteinsscienceclub\.com$/i.test(url.hostname) && /^\/events\/[^/]+\/?$/i.test(url.pathname); } catch { return false; }
+}
+function juniorEinsteinsEventBlocks(rawText: string, input: DiscoveryInput) {
+  return juniorEinsteinsSourceBlocks(rawText).filter((block) => isJuniorEinsteinsEventUrl(block.url || input.sourceUrl));
+}
+function titleCaseJuniorEinsteins(value: string) { return value.split(/\s+/).filter(Boolean).map((word) => /^(and|of|the|for)$/i.test(word) ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(" ").replace(/\bDublin\s+(\d{1,2})\b/i, "Dublin $1"); }
+function juniorEinsteinsEventSlug(sourceUrl: string) { try { return decodeURIComponent(new URL(sourceUrl).pathname.split("/").filter(Boolean).at(-1) ?? ""); } catch { return ""; } }
+function parseJuniorEinsteinsSlugDate(slug: string, fallbackText: string): BricksDateRange | null {
+  const text = slug.replace(/-/g, " ");
+  const year = inferYear(fallbackText);
+  const withMonths = text.match(/(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)?\s*(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)\s+to\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)?\s*(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)/i);
+  if (withMonths && monthNumbers[withMonths[2].toLowerCase()] && monthNumbers[withMonths[4].toLowerCase()]) return { label: withMonths[0], startDate: isoDate(withMonths[1], withMonths[2], year), endDate: isoDate(withMonths[3], withMonths[4], year), priority: 1 };
+  const sharedMonth = text.match(/(\d{1,2})(?:st|nd|rd|th)?\s+to\s+(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)/i);
+  if (sharedMonth && monthNumbers[sharedMonth[3].toLowerCase()]) return { label: sharedMonth[0], startDate: isoDate(sharedMonth[1], sharedMonth[3], year), endDate: isoDate(sharedMonth[2], sharedMonth[3], year), priority: 1 };
+  return parseJuniorEinsteinsVisibleDate(text) || parseDateRange(text);
+}
+function parseJuniorEinsteinsSlugTime(slug: string) {
+  const text = slug.replace(/(\d{1,2})(\d{2})(am|pm)\b/gi, "$1:$2$3").replace(/-/g, " ");
+  const compact = text.match(/\b(\d{1,2}):(\d{2})(am|pm)\s+(\d{1,2}):(\d{2})(am|pm)\b/i);
+  if (compact) return { label: compact[0], startTime: to24Hour(compact[1], compact[2], compact[3]), endTime: to24Hour(compact[4], compact[5], compact[6]) };
+  return parseTimeRange(text);
+}
+function parseJuniorEinsteinsEventLocation(sourceUrl: string, pageText: string) {
+  const slug = juniorEinsteinsEventSlug(sourceUrl).replace(/-/g, " ");
+  const title = `${pageText.split(/\n/).find((line) => /science.*camp/i.test(line)) || ""} ${slug}`;
+  if (/claregalway educate together national school/i.test(title)) return { town: "Claregalway", county: "Galway", address: "Claregalway Educate Together National School" };
+  if (/rosemont school/i.test(title)) return { town: "Dublin 18", county: "Dublin", address: "Rosemont School" };
+  if (/malahide castle gardens dublin/i.test(slug)) return { town: "Malahide", county: "Dublin", address: "Malahide Castle & Gardens" };
+  if (/festina lente/i.test(title) || /bray wicklow/i.test(slug)) return { town: "Bray", county: "Wicklow", address: "Festina Lente Equestrian Centre" };
+  if (/maynooth university/i.test(title) || /maynooth kildare/i.test(slug)) return { town: "Maynooth", county: "Kildare", address: "Maynooth University" };
+  const beforeCamp = slug.split(/\bscience\b|\bsummer\b|\beaster\b|\bhalloween\b|\bmidterm\b/i)[0].trim();
+  const tokens = beforeCamp.split(/\s+/).filter(Boolean);
+  const countyIndex = tokens.findIndex((token) => counties.some((county) => county.toLowerCase() === token.toLowerCase()));
+  const county = countyIndex >= 0 ? titleCaseJuniorEinsteins(tokens[countyIndex]) : findKnown(title.replace(/Claregalway/gi, ""), counties);
+  const locationTokens = countyIndex > 0 ? tokens.slice(0, countyIndex) : tokens;
+  const location = titleCaseJuniorEinsteins(locationTokens.join(" "));
+  const town = location.includes(" ") ? location.split(" ")[0] : location;
+  return { town, county: county === "Clare" && /claregalway/i.test(title) ? "Galway" : county, address: location };
+}
+function juniorEinsteinsEventRows(rawText: string, input: DiscoveryInput) {
+  return juniorEinsteinsEventBlocks(rawText, input).map((block) => {
+    const url = block.url || input.sourceUrl;
+    const slug = juniorEinsteinsEventSlug(url);
+    const dateRange = parseJuniorEinsteinsSlugDate(slug, `${block.text} ${rawText}`) || parseJuniorEinsteinsVisibleDate(block.text) || parseDateRange(block.text);
+    if (!dateRange) return null;
+    const time = parseJuniorEinsteinsSlugTime(slug).label ? parseJuniorEinsteinsSlugTime(slug) : parseTimeRange(block.text);
+    const location = parseJuniorEinsteinsEventLocation(url, block.text);
+    const holiday = juniorEinsteinsHoliday(`${slug} ${block.text}`, input.holidayType?.trim());
+    return { dateRange, title: `${slug} ${block.text}`.trim(), countyLabel: location.county, bookingUrl: url, matched: true, time, location, holiday, sourceUrl: url };
+  }).filter((row): row is NonNullable<typeof row> => Boolean(row));
+}
+
+function buildJuniorEinsteinsCamp(row: (ReturnType<typeof juniorEinsteinsListingRows>[number] | ReturnType<typeof juniorEinsteinsEventRows>[number]), input: DiscoveryInput, sourceMethod: SourceMethod): DiscoveryCamp {
+  const holiday = "holiday" in row ? row.holiday : juniorEinsteinsHoliday(`${row.title} ${row.dateRange.label}`, input.holidayType?.trim()); const time = "time" in row ? row.time : parseTimeRange(row.title); const location = "location" in row ? row.location : parseJuniorEinsteinsLocation(row.title, row.countyLabel); const age = parseAgeRange(row.title); const warnings = ["No price detected", age.ageMin ? "" : "Age requires review", row.matched ? "" : "Booking URL requires review"].filter(Boolean); const fieldConfidence = { camp_name: 96, county: location.county ? 92 : 0, town: location.town ? 90 : 0, address: location.address ? 82 : 0, eircode: 0, activity_type: 98, holiday_type: holiday !== "Other" ? 92 : 30, age: age.ageMin ? 85 : 0, start_date: 98, price: 0, booking_url: row.matched ? 90 : 55 };
+  return { camp_id: slugify(`junior-einsteins-${location.address || location.town}-${row.dateRange.startDate}`), provider_id: input.providerId?.trim() || "junior-einsteins-science-club", camp_name: juniorEinsteinsCampName(holiday), county: location.county, town: location.town, address: location.address, eircode: "", activity_type: "STEM", holiday_type: holiday, age_min: age.ageMin, age_max: age.ageMax, start_date: row.dateRange.startDate, end_date: row.dateRange.endDate, start_time: time.startTime, end_time: time.endTime, half_day_or_full_day: inferDayType(time.startTime, time.endTime), price: "", booking_url: row.bookingUrl, status: "draft", verified: false, featured: false, source_url: "sourceUrl" in row ? row.sourceUrl : input.sourceUrl, last_checked: today(), selected: true, needs_review: warnings.length > 0, duplicateWarnings: [], confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 1, start_date: 3, price: 1, booking_url: 1, activity_type: 1 }), fieldConfidence, extractionWarnings: warnings, source_method: sourceMethod };
+}
+function extractJuniorEinsteinsCamps(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) { const eventRows = juniorEinsteinsEventRows(rawText, input); const fallbackRows = eventRows.length ? [] : juniorEinsteinsListingRows(rawText, input); return (eventRows.length ? eventRows : fallbackRows).map((row) => buildJuniorEinsteinsCamp(row, input, sourceMethod)); }
+function buildJuniorEinsteinsDebugCandidates(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) { const eventRows = juniorEinsteinsEventRows(rawText, input); const fallbackRows = eventRows.length ? [] : juniorEinsteinsListingRows(rawText, input); const rows = eventRows.length ? eventRows : fallbackRows; return rows.map((row) => { const camp = buildJuniorEinsteinsCamp(row, input, sourceMethod); return { extractedText: `${row.dateRange.label} ${row.title}`, parsedFields: { provider_specific_extractor: "Junior Einsteins Science Club", event_urls_discovered: juniorEinsteinsEventBlocks(rawText, input).length, event_urls_prioritised: juniorEinsteinsEventBlocks(rawText, input).length, event_urls_crawled: juniorEinsteinsEventBlocks(rawText, input).length, event_pages_parsed: eventRows.length, records_created: rows.length, listing_fallback_rows_used: fallbackRows.length, duplicate_split_date_records_removed: 0, listing_rows_detected: fallbackRows.length, valid_camp_rows_parsed: rows.length, rows_rejected_as_testimonials_blog_faq_generic: Math.max(0, juniorEinsteinsLines(rawText).filter((line) => /testimonial|faq|here we are|is there a science camp|parent/i.test(line)).length), event_urls_matched: rows.filter((item) => item.matched).length, rows_missing_price: rows.length, rows_missing_age: rows.filter((item) => !parseAgeRange(item.title).ageMin).length, title: camp.camp_name, start_date: camp.start_date, end_date: camp.end_date, matched_time: parseTimeRange(row.title).label, start_time: camp.start_time, end_time: camp.end_time, day_type: camp.half_day_or_full_day, price: camp.price, age_min: camp.age_min, age_max: camp.age_max, location: camp.address || camp.town, town: camp.town, county: camp.county, booking_url: camp.booking_url, source_method: sourceMethod }, confidence: camp.confidence, validationFailures: camp.extractionWarnings } satisfies ExtractionDebugCandidate; }); }
 
 type BricksDateRange = { label: string; startDate: string; endDate: string; priority: number };
 type TimeRange = { startTime: string; endTime: string; label: string };

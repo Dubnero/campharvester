@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 const MAX_PAGES = 10;
 const MAX_STARCAMP_PAGES = 260;
+const MAX_JUNIOR_EINSTEINS_EVENT_PAGES = 50;
 const likelyCampLink = /\b(camps?|summer|easter|halloween|holiday|programme|program|book(?:ing)?|enrol|enroll|schedule|class)\b|profile\.php|selected_schedule|[?&]id=/i;
 // TODO: Add Google Maps/search discovery, franchise-wide crawling, and LLM extraction in later phases.
 const blockedLink = /\b(social|facebook|instagram|twitter|x\.com|linkedin|youtube|mailto:|tel:|maps?\.|google\.com\/maps|privacy|terms|cookie|login|account|cart|checkout|payment)\b/i;
@@ -81,6 +82,9 @@ function isRelatedDomain(source: URL, target: URL) {
 }
 
 function isStarcampUrl(url: URL) { return isSameOrSubdomain(url.hostname, "starcamp.ie"); }
+function isJuniorEinsteinsUrl(url: URL) { return isSameOrSubdomain(url.hostname, "junioreinsteinsscienceclub.com"); }
+function isJuniorEinsteinsListingPage(url: URL) { return isJuniorEinsteinsUrl(url) && /science-camps-list-kids-childrens-camp\/?$/i.test(url.pathname); }
+function isJuniorEinsteinsEventPage(url: URL) { return isJuniorEinsteinsUrl(url) && /^\/events\/[^/]+\/?$/i.test(url.pathname); }
 function isStarcampListingPage(url: URL) { return isStarcampUrl(url) && /^\/(summer|easter)-camps-list\/?$/i.test(url.pathname); }
 function isStarcampProductPage(url: URL) { return isStarcampUrl(url) && /^\/product\/[^/]*camp[^/]*\/?$/i.test(url.pathname); }
 function isStarcampPaginationPage(url: URL) { return isStarcampListingPage(url) || (isStarcampUrl(url) && /\/(?:[^/]+-camps-list\/page\/\d+|page\/\d+)\/?$/i.test(url.pathname)); }
@@ -97,6 +101,10 @@ function linkDecision(source: URL, link: string) {
   if (isStarcampListingPage(source)) {
     if (isStarcampProductPage(parsed) || isStarcampPaginationPage(parsed)) return "crawl";
     return "Starcamp listing crawl only follows product and pagination URLs";
+  }
+  if (isJuniorEinsteinsListingPage(source)) {
+    if (isJuniorEinsteinsEventPage(parsed)) return "crawl";
+    return "Junior Einsteins listing crawl only follows /events/ URLs";
   }
   if (!isRelatedDomain(source, parsed)) return "External domain is not clearly related to provider";
   if (!hasBookingPathOrQuery(parsed) && !likelyCampLink.test(link)) return "No camp/booking keyword";
@@ -140,6 +148,7 @@ export async function POST(request: Request) {
     if (!["http:", "https:"].includes(source.protocol)) throw new Error("Only http and https URLs are supported.");
 
     let starcampListingMode = false;
+    let juniorEinsteinsListingMode = false;
     let maxPages = MAX_PAGES;
     const queue = [source.toString()];
     const queued = new Set(queue);
@@ -159,9 +168,15 @@ export async function POST(request: Request) {
           starcampListingMode = true;
           maxPages = MAX_STARCAMP_PAGES;
         }
+        if (isJuniorEinsteinsListingPage(currentParsed)) {
+          juniorEinsteinsListingMode = true;
+          maxPages = MAX_JUNIOR_EINSTEINS_EVENT_PAGES + 1;
+        }
         const productPage = isStarcampProductPage(currentParsed);
-        pages.push({ url: currentUrl, text, readableTextLength: text.length, candidateCount: starcampListingMode && !productPage ? 0 : campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text), status: "analysed", sourceMethod: "crawler", extractionBlocked: starcampListingMode && !productPage });
-        for (const link of extractLinks(html, currentUrl)) {
+        const juniorEinsteinsEventPage = isJuniorEinsteinsEventPage(currentParsed);
+        pages.push({ url: currentUrl, text, readableTextLength: text.length, candidateCount: starcampListingMode && !productPage ? 0 : juniorEinsteinsListingMode && !juniorEinsteinsEventPage ? 0 : campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text), status: "analysed", sourceMethod: "crawler", extractionBlocked: (starcampListingMode && !productPage) || (juniorEinsteinsListingMode && !juniorEinsteinsEventPage) });
+        const links = extractLinks(html, currentUrl).sort((a, b) => Number(isJuniorEinsteinsEventPage(new URL(b))) - Number(isJuniorEinsteinsEventPage(new URL(a))));
+        for (const link of links) {
           discovered.add(link);
           if (queued.has(link) || crawled.has(link)) continue;
           const decision = linkDecision(source, link);
@@ -187,6 +202,11 @@ export async function POST(request: Request) {
         discoveredUrls: Array.from(discovered),
         crawledUrls: pages.filter((page) => page.status === "analysed").map((page) => page.url),
         skippedUrls: Array.from(skipped.entries()).map(([skippedUrl, reason]) => ({ url: skippedUrl, reason } satisfies SkippedUrl)),
+        juniorEinsteins: juniorEinsteinsListingMode ? {
+          eventUrlsDiscovered: Array.from(discovered).filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length,
+          eventUrlsCrawled: pages.filter((page) => isJuniorEinsteinsEventPage(new URL(page.url)) && page.status === "analysed").length,
+          eventUrlsSkipped: Array.from(skipped.keys()).filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length,
+        } : undefined,
         starcamp: starcampListingMode ? {
           listingPagesCrawled: pages.filter((page) => isStarcampPaginationPage(new URL(page.url)) && page.status === "analysed").length,
           paginationPagesDiscovered: Array.from(discovered).filter((item) => isStarcampPaginationPage(new URL(item))).length,
@@ -195,7 +215,7 @@ export async function POST(request: Request) {
           productUrlsSkipped: Array.from(skipped.keys()).filter((item) => isStarcampProductPage(new URL(item))).length,
         } : undefined,
       },
-      warnings: [pages.some((page) => page.dynamicWarning) ? "This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed." : "", starcampListingMode && queue.length ? `Starcamp crawl limit warning: ${pages.filter((page) => isStarcampPaginationPage(new URL(page.url))).length} listing page(s), ${Array.from(discovered).filter((item) => isStarcampProductPage(new URL(item))).length} product(s) discovered, ${pages.filter((page) => isStarcampProductPage(new URL(page.url)) && page.status === "analysed").length} product(s) crawled, ${queue.filter((item) => isStarcampProductPage(new URL(item))).length} product(s) skipped because of crawl limits: ${queue.filter((item) => isStarcampProductPage(new URL(item))).join(", ")}` : ""].filter(Boolean),
+      warnings: [pages.some((page) => page.dynamicWarning) ? "This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed." : "", juniorEinsteinsListingMode && queue.length ? `Junior Einsteins crawl limit warning: ${Array.from(discovered).filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length} event(s) discovered, ${pages.filter((page) => isJuniorEinsteinsEventPage(new URL(page.url)) && page.status === "analysed").length} event(s) crawled, ${queue.filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length} event(s) skipped because of crawl limits.` : "", starcampListingMode && queue.length ? `Starcamp crawl limit warning: ${pages.filter((page) => isStarcampPaginationPage(new URL(page.url))).length} listing page(s), ${Array.from(discovered).filter((item) => isStarcampProductPage(new URL(item))).length} product(s) discovered, ${pages.filter((page) => isStarcampProductPage(new URL(page.url)) && page.status === "analysed").length} product(s) crawled, ${queue.filter((item) => isStarcampProductPage(new URL(item))).length} product(s) skipped because of crawl limits: ${queue.filter((item) => isStarcampProductPage(new URL(item))).join(", ")}` : ""].filter(Boolean),
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to fetch URL." }, { status: 502 });
