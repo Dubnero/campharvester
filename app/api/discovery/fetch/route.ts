@@ -33,7 +33,7 @@ function htmlToText(html: string) {
 
 function extractLinks(html: string, baseUrl: string) {
   const links: string[] = [];
-  const linkRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi;
+  const linkRegex = /<(?:a|iframe|script)\b[^>]*(?:href|src)=["']([^"']+)["'][^>]*>/gi;
   let match: RegExpExecArray | null;
   while ((match = linkRegex.exec(html)) !== null) {
     try {
@@ -66,9 +66,16 @@ function isBricks4KidzBookingFlow(source: URL, target: URL) {
   return isSameOrSubdomain(source.hostname, "bricks4kidz.ie") && isSameOrSubdomain(target.hostname, "bricks4kidznow.com");
 }
 
+function isBrayAdventuresFareHarborCalendar(source: URL, target: URL) {
+  return isSameOrSubdomain(source.hostname, "brayadventures.ie")
+    && isSameOrSubdomain(target.hostname, "fareharbor.com")
+    && /^\/embeds\/book\/brayadventures\/items\/120070\/calendar\/?$/i.test(target.pathname);
+}
+
 function isRelatedDomain(source: URL, target: URL) {
   if (source.hostname === target.hostname || rootDomain(source.hostname) === rootDomain(target.hostname)) return true;
   if (isBricks4KidzBookingFlow(source, target)) return true;
+  if (isBrayAdventuresFareHarborCalendar(source, target)) return true;
   const sourceToken = providerToken(source.hostname);
   return sourceToken.length >= 4 && target.hostname.toLowerCase().includes(sourceToken);
 }
