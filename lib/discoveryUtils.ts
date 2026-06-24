@@ -18,6 +18,90 @@ const campSignal = /\b(summer|easter|halloween|midterm|christmas)\s+(camp|course
 const eircodeRegex = /\b(?:[AC-FHKNPRTV-Y]\d{2}|D6W)\s?[0-9AC-FHKNPRTV-Y]{4}\b/i;
 const candidateAgeWindow = 8;
 
+const htmlNamedEntities: Record<string, string> = {
+  amp: "&",
+  apos: "'",
+  copy: "©",
+  eacute: "é",
+  euro: "€",
+  gt: ">",
+  hellip: "…",
+  laquo: "«",
+  ldquo: "“",
+  lsquo: "‘",
+  lt: "<",
+  mdash: "—",
+  nbsp: " ",
+  ndash: "–",
+  quot: "\"",
+  raquo: "»",
+  rdquo: "”",
+  reg: "®",
+  rsquo: "’",
+  trade: "™",
+};
+
+function decodeNumericEntity(entity: string, value: string, radix: 10 | 16) {
+  const codePoint = Number.parseInt(value, radix);
+  return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : entity;
+}
+
+export function decodeExtractedText(value: string) {
+  return value
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]+);/gi, (entity, body: string) => {
+      if (body.startsWith("#x") || body.startsWith("#X")) return decodeNumericEntity(entity, body.slice(2), 16);
+      if (body.startsWith("#")) return decodeNumericEntity(entity, body.slice(1), 10);
+      return htmlNamedEntities[body.toLowerCase()] ?? entity;
+    })
+    .replace(/[\t\r\n ]+/g, " ")
+    .trim();
+}
+
+function decodeExtractedUrl(value: string) {
+  const decoded = decodeExtractedText(value);
+  if (!decoded) return decoded;
+  try {
+    const original = new URL(value);
+    const next = new URL(decoded);
+    return original.protocol === next.protocol && original.host === next.host ? decoded : value.trim();
+  } catch {
+    return decoded;
+  }
+}
+
+function normalizeExtractedCamp(camp: DiscoveryCamp): DiscoveryCamp {
+  return {
+    ...camp,
+    camp_name: decodeExtractedText(camp.camp_name),
+    town: decodeExtractedText(camp.town),
+    county: decodeExtractedText(camp.county),
+    address: decodeExtractedText(camp.address),
+    eircode: decodeExtractedText(camp.eircode),
+    activity_type: decodeExtractedText(camp.activity_type),
+    holiday_type: decodeExtractedText(camp.holiday_type) as HolidayType,
+    half_day_or_full_day: decodeExtractedText(camp.half_day_or_full_day) as Camp["half_day_or_full_day"],
+    booking_url: decodeExtractedUrl(camp.booking_url),
+    source_url: decodeExtractedUrl(camp.source_url),
+    status: decodeExtractedText(camp.status) as Camp["status"],
+  };
+}
+
+function normalizeExtractedProvider(provider: DiscoveryProvider): DiscoveryProvider {
+  return {
+    ...provider,
+    provider_name: decodeExtractedText(provider.provider_name),
+    website: decodeExtractedUrl(provider.website),
+    primary_email: decodeExtractedText(provider.primary_email),
+    primary_phone: decodeExtractedText(provider.primary_phone),
+    description: decodeExtractedText(provider.description),
+    primary_county: decodeExtractedText(provider.primary_county ?? ""),
+    activity_category: decodeExtractedText(provider.activity_category ?? ""),
+    provider_type: decodeExtractedText(provider.provider_type ?? ""),
+    status: decodeExtractedText(provider.status ?? ""),
+    notes: decodeExtractedText(provider.notes ?? ""),
+  };
+}
+
 const monthNumbers: Record<string, string> = { jan: "01", january: "01", feb: "02", february: "02", mar: "03", march: "03", apr: "04", april: "04", may: "05", jun: "06", june: "06", jul: "07", july: "07", aug: "08", august: "08", sep: "09", sept: "09", september: "09", oct: "10", october: "10", nov: "11", november: "11", dec: "12", december: "12" };
 const southDublinTowns = ["Firhouse", "Cherrywood", "Mount Merrion", "Newtownpark", "Kilternan", "Saggart", "Rathfarnham", "Killiney", "Foxrock", "Sandyford", "Knocklyon", "Cabinteely", "Dundrum", "Stillorgan", "Blackrock", "Monkstown", "Dún Laoghaire", "Dun Laoghaire", "Dalkey", "Ballinteer", "Terenure", "Templeogue", "Tallaght", "Lucan", "Clondalkin"];
 const nonCampOffering = /\b(after[- ]?school(?:\s+clubs?)?|birthday\s+part(?:y|ies)|workshops?|holiday\s+clubs?)\b/i;
@@ -572,7 +656,7 @@ export function extractDiscoveryRecords(input: DiscoveryInput, rawText: string, 
   const camps = dedupeDiscoveryCamps(starcampSource ? starcampCamps : bricksCamps.length ? bricksCamps : genericCamps);
   const manualEmptyWarning = sourceMethod === "manual_paste" && rawText.trim() && camps.length === 0 ? "Manual text was added, but no camps could be extracted. Check extraction patterns or paste a more complete section." : "";
   const warnings = [providerName ? "" : "Provider name could not be determined.", starcampSource && !isStarcampProductSourceUrl(input.sourceUrl) ? "Starcamp listing/index page skipped for camp extraction; product pages are required." : "", manualEmptyWarning || (camps.length ? "" : "No high-confidence camp offerings found; generic navigation items were ignored."), camps.length && camps.every((camp) => !camp.price) ? "No prices detected" : "", camps.some((camp) => !camp.start_date) ? `${camps.filter((camp) => !camp.start_date).length} camp(s) missing dates` : "", camps.some((camp) => !camp.booking_url) ? "Booking links not detected for all camps" : ""].filter(Boolean);
-  return { providers: provider.provider_id || provider.provider_name ? [provider] : [], camps, warnings, textLength: text.length };
+  return { providers: provider.provider_id || provider.provider_name ? [normalizeExtractedProvider(provider)] : [], camps: camps.map(normalizeExtractedCamp), warnings, textLength: text.length };
 }
 
 export function dedupeDiscoveryCamps(camps: DiscoveryCamp[]) {
