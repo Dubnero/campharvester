@@ -22,6 +22,7 @@ Jun 29 2026 - Jul 03 2026
 Book now
 Source URL: ${eventUrl}
 Malahide Castle Gardens Dublin Science Summer Camp for Kids Monday 29th June to Friday 3rd July 930am 130pm daily
+Address: Malahide Castle & Gardens, Back Road, Malahide, Co. Dublin
 Cost:
 €198
 Age Groups:
@@ -38,7 +39,7 @@ assert.equal(eventCamps[0].start_time, '09:30');
 assert.equal(eventCamps[0].end_time, '13:30');
 assert.equal(eventCamps[0].town, 'Malahide');
 assert.equal(eventCamps[0].county, 'Dublin');
-assert.equal(eventCamps[0].address, 'Malahide Castle & Gardens');
+assert.equal(eventCamps[0].address, 'Malahide Castle & Gardens, Back Road, Malahide, Co. Dublin');
 assert.equal(eventCamps[0].booking_url, eventUrl);
 assert.equal(eventCamps[0].source_url, eventUrl);
 assert.equal(eventCamps[0].price, '€198');
@@ -75,4 +76,40 @@ Suitable for 5 -11 years old`;
 const augustCamp = extractDiscoveryRecords({ sourceUrl: augustUrl }, augustText).camps[0];
 assert.equal(augustCamp.start_date, '2026-08-10');
 assert.equal(augustCamp.end_date, '2026-08-14');
+
+
+const rosemontUrl = 'https://junioreinsteinsscienceclub.com/events/summer-science-camp-for-kids-rosemont-school-dublin-18-monday-6th-to-friday-10th-july-9am-1pm-daily/';
+const rosemontText = `Source URL: ${rosemontUrl}
+Summer Science Camp for Kids Rosemont School Dublin 18 Monday 6th to Friday 10th July 9am-1pm daily
+Address: Rosemont School, Enniskerry Road, Sandyford, Dublin 18
+Date:
+Jul 06 2026 - Jul 10 2026
+Time:
+09:00 AM - 01:00 PM
+Cost €198
+Suitable for 5 -12 years old`;
+const rosemontCamp = extractDiscoveryRecords({ sourceUrl: rosemontUrl }, rosemontText).camps[0];
+assert.equal(rosemontCamp.address, 'Rosemont School, Enniskerry Road, Sandyford, Dublin 18');
+assert.equal(rosemontCamp.town, 'Sandyford');
+assert.equal(rosemontCamp.county, 'Dublin');
+assert.equal(rosemontCamp.start_date, '2026-07-06');
+assert.equal(rosemontCamp.end_date, '2026-07-10');
+assert.equal(rosemontCamp.start_time, '09:00');
+assert.equal(rosemontCamp.end_time, '13:00');
+assert.equal(rosemontCamp.age_min, 5);
+assert.equal(rosemontCamp.age_max, 12);
+
+const claregalwayUrl = 'https://junioreinsteinsscienceclub.com/events/claregalway-educate-together-national-school-galway-science-summer-camp-for-kids-monday-10th-to-friday-14th-august-9am-1pm-daily/';
+const claregalwayText = `Source URL: ${claregalwayUrl}
+Claregalway Educate Together National School Galway Science Summer Camp
+Address
+Claregalway Educate Together National School, Lakeview, Claregalway, Co. Galway
+Date : 2026-08-10 - 2026-08-14
+Cost €198
+Suitable for 5 -11 years old`;
+const claregalwayCamp = extractDiscoveryRecords({ sourceUrl: claregalwayUrl }, claregalwayText).camps[0];
+assert.equal(claregalwayCamp.address, 'Claregalway Educate Together National School, Lakeview, Claregalway, Co. Galway');
+assert.equal(claregalwayCamp.town, 'Claregalway');
+assert.equal(claregalwayCamp.county, 'Galway');
+
 console.log('Junior Einsteins tests passed');

@@ -228,7 +228,35 @@ function parseJuniorEinsteinsSlugTime(slug: string) {
   if (compact) return { label: compact[0], startTime: to24Hour(compact[1], compact[2], compact[3]), endTime: to24Hour(compact[4], compact[5], compact[6]) };
   return parseTimeRange(text);
 }
+
+function cleanJuniorEinsteinsAddress(value: string) {
+  return decodeExtractedText(value).replace(/^[•\-–—*]\s*/, "").replace(/\s{2,}/g, " ").replace(/[.;]+$/g, "").trim();
+}
+function juniorEinsteinsExplicitAddress(text: string) {
+  const lines = juniorEinsteinsLines(text);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const sameLine = line.match(/^Address\s*:?\s*(.+)$/i);
+    if (sameLine?.[1]) return cleanJuniorEinsteinsAddress(sameLine[1]);
+    if (/^Address\s*:?$/i.test(line)) {
+      const next = lines.slice(index + 1, index + 4).find((candidate) => candidate.includes(",") && !/^(Date|Time|Cost|Age Groups?)\s*:?/i.test(candidate));
+      if (next) return cleanJuniorEinsteinsAddress(next);
+    }
+  }
+  return "";
+}
+function isJuniorEinsteinsDublinDistrict(value: string) { return /^Dublin\s*\d{1,2}$/i.test(value.trim()) || /^(?:Co\.?|County)\s+Dublin$/i.test(value.trim()); }
+function deriveJuniorEinsteinsLocationFromAddress(address: string) {
+  const parts = address.split(",").map((part) => cleanJuniorEinsteinsAddress(part).replace(/^Co\.?\s+/i, "").replace(/^County\s+/i, "")).filter(Boolean);
+  const county = parts.find((part) => counties.some((known) => known.toLowerCase() === part.toLowerCase())) || (parts.some((part) => /Dublin\s*\d{1,2}/i.test(part)) ? "Dublin" : "");
+  const localityCandidates = parts.filter((part) => !counties.some((known) => known.toLowerCase() === part.toLowerCase()) && !isJuniorEinsteinsDublinDistrict(part));
+  const town = localityCandidates.at(-1) || parts.find((part) => !/^(?:Co\.?|County)\s+/i.test(part)) || "";
+  return { town, county, address };
+}
+
 function parseJuniorEinsteinsEventLocation(sourceUrl: string, pageText: string) {
+  const explicitAddress = juniorEinsteinsExplicitAddress(pageText);
+  if (explicitAddress) return deriveJuniorEinsteinsLocationFromAddress(explicitAddress);
   const slug = juniorEinsteinsEventSlug(sourceUrl).replace(/-/g, " ");
   const title = `${pageText.split(/\n/).find((line) => /science.*camp/i.test(line)) || ""} ${slug}`;
   if (/claregalway educate together national school/i.test(title)) return { town: "Claregalway", county: "Galway", address: "Claregalway Educate Together National School" };
