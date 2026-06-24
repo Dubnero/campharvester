@@ -21,7 +21,15 @@ Science Camps List
 Jun 29 2026 - Jul 03 2026
 Book now
 Source URL: ${eventUrl}
-Malahide Castle Gardens Dublin Science Summer Camp for Kids Monday 29th June to Friday 3rd July 930am 130pm daily`;
+Malahide Castle Gardens Dublin Science Summer Camp for Kids Monday 29th June to Friday 3rd July 930am 130pm daily
+Cost:
+€198
+Age Groups:
+Suitable for 5 -11 years old; grouped by age (5-8 year olds ATOMS & 9-11 year olds MOLECULES).
+Date:
+Jun 29 2026 - Jul 03 2026
+Time:
+09:30 AM - 01:30 PM`;
 const eventCamps = extractDiscoveryRecords(input, eventText).camps;
 assert.equal(eventCamps.length, 1);
 assert.equal(eventCamps[0].start_date, '2026-06-29');
@@ -33,6 +41,11 @@ assert.equal(eventCamps[0].county, 'Dublin');
 assert.equal(eventCamps[0].address, 'Malahide Castle & Gardens');
 assert.equal(eventCamps[0].booking_url, eventUrl);
 assert.equal(eventCamps[0].source_url, eventUrl);
+assert.equal(eventCamps[0].price, '€198');
+assert.equal(eventCamps[0].age_min, 5);
+assert.equal(eventCamps[0].age_max, 11);
+assert.equal(eventCamps[0].holiday_type, 'Summer');
+assert.equal(eventCamps[0].camp_name, 'Junior Einsteins Science Summer Camp');
 
 const duplicateDateText = `${eventText}
 Source URL: https://junioreinsteinsscienceclub.com/events/glenageary-dublin-science-summer-camp-for-kids-monday-6th-july-to-friday-10th-july-9am-1pm-daily/
@@ -52,4 +65,14 @@ assert.equal(juniorPriorityDecision(source, eventUrl), 'crawl');
 assert.equal(juniorPriorityDecision(source, 'https://junioreinsteinsscienceclub.com/wp-content/theme/app.js'), 'skip');
 assert.equal(juniorPriorityDecision(source, 'https://junioreinsteinsscienceclub.com/testimonials/'), 'skip');
 assert.equal(juniorPriorityDecision(source, 'https://junioreinsteinsscienceclub.com/about/'), 'skip');
+
+const augustUrl = 'https://junioreinsteinsscienceclub.com/events/malahide-castle-gardens-dublin-science-summer-camp-for-kids-monday-4th-august-to-friday-7th-august-930am-130pm-daily/';
+const augustText = `Source URL: ${augustUrl}
+Malahide Castle Gardens Dublin Science Summer Camp for Kids Monday 4th August to Friday 7th August 930am 130pm daily
+Date : 2026-08-10 - 2026-08-14
+Cost €198
+Suitable for 5 -11 years old`;
+const augustCamp = extractDiscoveryRecords({ sourceUrl: augustUrl }, augustText).camps[0];
+assert.equal(augustCamp.start_date, '2026-08-10');
+assert.equal(augustCamp.end_date, '2026-08-14');
 console.log('Junior Einsteins tests passed');
