@@ -106,10 +106,62 @@ Address
 Claregalway Educate Together National School, Lakeview, Claregalway, Co. Galway
 Date : 2026-08-10 - 2026-08-14
 Cost €198
-Suitable for 5 -11 years old`;
+This is an exclusive event for all children aged 5–12 in Claregalway`;
 const claregalwayCamp = extractDiscoveryRecords({ sourceUrl: claregalwayUrl }, claregalwayText).camps[0];
 assert.equal(claregalwayCamp.address, 'Claregalway Educate Together National School, Lakeview, Claregalway, Co. Galway');
 assert.equal(claregalwayCamp.town, 'Claregalway');
 assert.equal(claregalwayCamp.county, 'Galway');
+assert.equal(claregalwayCamp.age_min, 5);
+assert.equal(claregalwayCamp.age_max, 12);
+
+
+const glenagearyUrl = 'https://junioreinsteinsscienceclub.com/events/summer-science-camp-for-kids-glenageary-dublin-monday-6th-july-to-friday-10th-july-9am-1pm-daily/';
+const glenagearyCamp = extractDiscoveryRecords({ sourceUrl: glenagearyUrl }, `Source URL: ${glenagearyUrl}
+Summer Science Camp for Kids, Glenageary, Dublin – Monday 6th July to Friday 10th July
+Date Jul 06 2026 - Jul 10 2026
+Cost €198`).camps[0];
+assert.equal(glenagearyCamp.town, 'Glenageary');
+assert.equal(glenagearyCamp.county, 'Dublin');
+assert.notEqual(glenagearyCamp.address, '');
+assert.notEqual(glenagearyCamp.age_min, 0);
+assert.notEqual(glenagearyCamp.age_max, 0);
+
+const brayUrl = 'https://junioreinsteinsscienceclub.com/events/bray-wicklow-summer-science-camp-for-kids-monday-20th-to-friday-24th-july-9am-1pm-daily-at-festina-lente-equestrian-centre/';
+const brayCamp = extractDiscoveryRecords({ sourceUrl: brayUrl }, `Source URL: ${brayUrl}
+Bray, Wicklow – Summer Science Camp for kids – Monday 20th to Friday 24th July at Festina Lente Equestrian Centre
+Date Jul 20 2026 - Jul 24 2026
+Cost €198`).camps[0];
+assert.equal(brayCamp.town, 'Bray');
+assert.equal(brayCamp.county, 'Wicklow');
+assert.equal(brayCamp.address, 'Festina Lente Equestrian Centre');
+
+const leopardstownUrl = 'https://junioreinsteinsscienceclub.com/events/summer-science-camp-for-kids-nord-anglia-international-school-leopardstown-dublin-18-monday-13th-to-friday-17th-july-9am-1pm-daily/';
+const leopardstownCamp = extractDiscoveryRecords({ sourceUrl: leopardstownUrl }, `Source URL: ${leopardstownUrl}
+Summer Science Camp for Kids -Nord Anglia International School, Leopardstown, Dublin 18
+Date Jul 13 2026 - Jul 17 2026
+Cost €198`).camps[0];
+assert.equal(leopardstownCamp.town, 'Leopardstown');
+assert.equal(leopardstownCamp.county, 'Dublin');
+assert.equal(leopardstownCamp.address, 'Nord Anglia International School, Leopardstown, Dublin 18');
+
+const greystonesUrl = 'https://junioreinsteinsscienceclub.com/events/summer-science-camp-for-kids-greystones-wicklow-monday-13th-to-friday-17th-july-9am-1pm-daily/';
+const greystonesCamp = extractDiscoveryRecords({ sourceUrl: greystonesUrl }, `Source URL: ${greystonesUrl}
+Summer Science Camp for kids – Greystones, Wicklow
+Date Jul 13 2026 - Jul 17 2026
+Cost €198`).camps[0];
+assert.equal(greystonesCamp.town, 'Greystones');
+assert.equal(greystonesCamp.county, 'Wicklow');
+assert.notEqual(greystonesCamp.address, '');
+
+const medicsUrl = 'https://junioreinsteinsscienceclub.com/events/junior-medics-science-camp-galway/';
+const medicsCamps = extractDiscoveryRecords({ sourceUrl: medicsUrl }, `Source URL: ${medicsUrl}
+Junior Medics Science camp Galway
+Date Jul 13 2026 - Jul 13 2026`).camps;
+assert.equal(medicsCamps.length, 0);
+const astronautsUrl = 'https://junioreinsteinsscienceclub.com/events/junior-astronauts-science-camp-galway/';
+const astronautsCamps = extractDiscoveryRecords({ sourceUrl: astronautsUrl }, `Source URL: ${astronautsUrl}
+Junior Astronauts Science camp Galway
+Date Jul 13 2026 - Jul 13 2026`).camps;
+assert.equal(astronautsCamps.length, 0);
 
 console.log('Junior Einsteins tests passed');

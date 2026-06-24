@@ -189,7 +189,7 @@ function juniorEinsteinsListingRows(rawText: string, input: DiscoveryInput) {
   for (let index = 0; index < lines.length; index += 1) {
     const dateRange = parseJuniorEinsteinsVisibleDate(lines[index]); if (!dateRange) continue;
     const title = lines.slice(index + 1, index + 5).find((line) => /camp/i.test(line) && !/^book now$/i.test(line) && !/^https?:/i.test(line)) || "";
-    if (!title || /testimonial|faq|here we are|is there a science camp|customer|parent/i.test(title)) continue;
+    if (!title || /testimonial|faq|here we are|is there a science camp|customer|parent|^junior\s+(?:medics|astronauts)\s+science\s+camp/i.test(title)) continue;
     const countyLabel = lines.slice(index + 1, index + 7).find((line) => counties.includes(line)) || "";
     const bookingUrl = matchJuniorEinsteinsBookingUrl(title, urls, input.sourceUrl);
     rows.push({ dateRange, title, countyLabel, bookingUrl, matched: bookingUrl !== input.sourceUrl });
@@ -233,6 +233,9 @@ function cleanJuniorEinsteinsAddress(value: string) {
   return decodeExtractedText(value).replace(/^[•\-–—*]\s*/, "").replace(/\s{2,}/g, " ").replace(/[.;]+$/g, "").trim();
 }
 function juniorEinsteinsExplicitAddress(text: string) {
+  const addressBlock = text.match(/(?:^|\n)\s*(?:[•\-–—*]\s*)?Address\s*:?\s*([\s\S]{0,240}?)(?=\n\s*(?:Date|Time|Cost|Age Groups?|Suitable|Share|Book now|€)\b|$)/i);
+  const blockAddress = cleanJuniorEinsteinsAddress(addressBlock?.[1]?.replace(/\n+/g, " ") || "");
+  if (blockAddress.includes(",")) return blockAddress;
   const lines = juniorEinsteinsLines(text);
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -259,6 +262,10 @@ function parseJuniorEinsteinsEventLocation(sourceUrl: string, pageText: string) 
   if (explicitAddress) return deriveJuniorEinsteinsLocationFromAddress(explicitAddress);
   const slug = juniorEinsteinsEventSlug(sourceUrl).replace(/-/g, " ");
   const title = `${pageText.split(/\n/).find((line) => /science.*camp/i.test(line)) || ""} ${slug}`;
+  const locationText = `${title} ${pageText}`;
+  if (/nord anglia international school/i.test(locationText)) return { town: "Leopardstown", county: "Dublin", address: "Nord Anglia International School, Leopardstown, Dublin 18" };
+  if (/\bglenageary\b/i.test(locationText) && /\bdublin\b/i.test(locationText)) return { town: "Glenageary", county: "Dublin", address: "Glenageary, Dublin" };
+  if (/\bgreystones\b/i.test(locationText) && /\bwicklow\b/i.test(locationText)) return { town: "Greystones", county: "Wicklow", address: "Greystones, Wicklow" };
   if (/claregalway educate together national school/i.test(title)) return { town: "Claregalway", county: "Galway", address: "Claregalway Educate Together National School" };
   if (/rosemont school/i.test(title)) return { town: "Dublin 18", county: "Dublin", address: "Rosemont School" };
   if (/malahide castle gardens dublin/i.test(slug)) return { town: "Malahide", county: "Dublin", address: "Malahide Castle & Gardens" };
@@ -280,9 +287,12 @@ function parseJuniorEinsteinsPrice(text: string) {
   return decodeExtractedText((costMatch?.[1] || anyPrice?.[0] || "").replace(/^(?:EUR)\s*/i, "€").replace(/\s+/g, ""));
 }
 function parseJuniorEinsteinsAge(text: string) {
-  const ranges = Array.from(text.matchAll(/\b(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s*(?:years?\s*old|year\s*olds?|yrs?)\b/gi)).map((match) => ({ min: Number(match[1]), max: Number(match[2]), label: match[0] }));
-  const suitable = text.match(/Suitable\s+for\s+(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s*(?:years?\s*old|yrs?)?/i);
+  const normalizedText = text.replace(/[–—]/g, "-");
+  const ranges = Array.from(normalizedText.matchAll(/\b(\d{1,2})\s*(?:-|to)\s*(\d{1,2})\s*(?:years?\s*old|year\s*olds?|yrs?)\b/gi)).map((match) => ({ min: Number(match[1]), max: Number(match[2]), label: match[0] }));
+  const suitable = normalizedText.match(/Suitable\s+for\s+(\d{1,2})\s*(?:-|to)\s*(\d{1,2})\s*(?:years?\s*old|yrs?)?/i);
   if (suitable) ranges.unshift({ min: Number(suitable[1]), max: Number(suitable[2]), label: suitable[0] });
+  const aged = normalizedText.match(/(?:children\s+)?aged\s+(\d{1,2})\s*(?:-|to)\s*(\d{1,2})\b/i);
+  if (aged) ranges.unshift({ min: Number(aged[1]), max: Number(aged[2]), label: aged[0] });
   if (!ranges.length) return { label: "", ageMin: 0, ageMax: 0 };
   return { label: ranges.map((range) => range.label).join(", "), ageMin: Math.min(...ranges.map((range) => range.min)), ageMax: Math.max(...ranges.map((range) => range.max)) };
 }
@@ -291,6 +301,7 @@ function juniorEinsteinsEventRows(rawText: string, input: DiscoveryInput) {
   return juniorEinsteinsEventBlocks(rawText, input).map((block) => {
     const url = block.url || input.sourceUrl;
     const slug = juniorEinsteinsEventSlug(url);
+    if (/^(junior-medics|junior-astronauts)-science-camp/i.test(slug)) return null;
     const dateRange = parseJuniorEinsteinsVisibleDate(block.text) || parseDateRange(block.text) || parseJuniorEinsteinsSlugDate(slug, `${block.text} ${rawText}`);
     if (!dateRange) return null;
     const time = parseJuniorEinsteinsSlugTime(slug).label ? parseJuniorEinsteinsSlugTime(slug) : parseTimeRange(block.text);
@@ -302,7 +313,7 @@ function juniorEinsteinsEventRows(rawText: string, input: DiscoveryInput) {
 
 function buildJuniorEinsteinsCamp(row: (ReturnType<typeof juniorEinsteinsListingRows>[number] | ReturnType<typeof juniorEinsteinsEventRows>[number]), input: DiscoveryInput, sourceMethod: SourceMethod): DiscoveryCamp {
   const holiday = "holiday" in row ? row.holiday : juniorEinsteinsHoliday(`${row.title} ${row.dateRange.label}`, input.holidayType?.trim()); const time = "time" in row ? row.time : parseTimeRange(row.title); const location = "location" in row ? row.location : parseJuniorEinsteinsLocation(row.title, row.countyLabel); const age = "age" in row ? row.age : parseJuniorEinsteinsAge(row.title); const price = "price" in row ? row.price : ""; const warnings = [price ? "" : "No price detected", age.ageMin ? "" : "Age requires review", row.matched ? "" : "Booking URL requires review"].filter(Boolean); const fieldConfidence = { camp_name: 96, county: location.county ? 92 : 0, town: location.town ? 90 : 0, address: location.address ? 82 : 0, eircode: 0, activity_type: 98, holiday_type: holiday !== "Other" ? 92 : 30, age: age.ageMin ? 85 : 0, start_date: 98, price: price ? 100 : 0, booking_url: row.matched ? 90 : 55 };
-  return { camp_id: slugify(`junior-einsteins-${location.address || location.town}-${row.dateRange.startDate}`), provider_id: input.providerId?.trim() || "junior-einsteins-science-club", camp_name: juniorEinsteinsCampName(holiday), county: location.county, town: location.town, address: location.address, eircode: "", activity_type: "STEM", holiday_type: holiday, age_min: age.ageMin, age_max: age.ageMax, start_date: row.dateRange.startDate, end_date: row.dateRange.endDate, start_time: time.startTime, end_time: time.endTime, half_day_or_full_day: inferDayType(time.startTime, time.endTime), price, booking_url: row.bookingUrl, status: "draft", verified: false, featured: false, source_url: "sourceUrl" in row ? row.sourceUrl : input.sourceUrl, last_checked: today(), selected: true, needs_review: warnings.length > 0, duplicateWarnings: [], confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 1, start_date: 3, price: 1, booking_url: 1, activity_type: 1 }), fieldConfidence, extractionWarnings: warnings, source_method: sourceMethod };
+  return { camp_id: slugify(`junior-einsteins-${location.address || location.town}-${row.dateRange.startDate}`), provider_id: input.providerId?.trim() || "junior-einsteins-science-club", camp_name: juniorEinsteinsCampName(holiday), county: location.county, town: location.town, address: location.address, eircode: "", activity_type: "STEM", holiday_type: holiday, age_min: age.ageMin || ("" as unknown as number), age_max: age.ageMax || ("" as unknown as number), start_date: row.dateRange.startDate, end_date: row.dateRange.endDate, start_time: time.startTime, end_time: time.endTime, half_day_or_full_day: inferDayType(time.startTime, time.endTime), price, booking_url: row.bookingUrl, status: "draft", verified: false, featured: false, source_url: "sourceUrl" in row ? row.sourceUrl : input.sourceUrl, last_checked: today(), selected: true, needs_review: warnings.length > 0, duplicateWarnings: [], confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 1, start_date: 3, price: 1, booking_url: 1, activity_type: 1 }), fieldConfidence, extractionWarnings: warnings, source_method: sourceMethod };
 }
 function extractJuniorEinsteinsCamps(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) { const eventRows = juniorEinsteinsEventRows(rawText, input); const fallbackRows = eventRows.length ? [] : juniorEinsteinsListingRows(rawText, input); return (eventRows.length ? eventRows : fallbackRows).map((row) => buildJuniorEinsteinsCamp(row, input, sourceMethod)); }
 function buildJuniorEinsteinsDebugCandidates(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) { const eventRows = juniorEinsteinsEventRows(rawText, input); const fallbackRows = eventRows.length ? [] : juniorEinsteinsListingRows(rawText, input); const rows = eventRows.length ? eventRows : fallbackRows; return rows.map((row) => { const camp = buildJuniorEinsteinsCamp(row, input, sourceMethod); return { extractedText: `${row.dateRange.label} ${row.title}`, parsedFields: { provider_specific_extractor: "Junior Einsteins Science Club", event_urls_discovered: juniorEinsteinsEventBlocks(rawText, input).length, event_urls_prioritised: juniorEinsteinsEventBlocks(rawText, input).length, event_urls_crawled: juniorEinsteinsEventBlocks(rawText, input).length, event_pages_parsed: eventRows.length, records_created: rows.length, listing_fallback_rows_used: fallbackRows.length, duplicate_split_date_records_removed: 0, listing_rows_detected: fallbackRows.length, valid_camp_rows_parsed: rows.length, rows_rejected_as_testimonials_blog_faq_generic: Math.max(0, juniorEinsteinsLines(rawText).filter((line) => /testimonial|faq|here we are|is there a science camp|parent/i.test(line)).length), event_urls_matched: rows.filter((item) => item.matched).length, rows_missing_price: rows.length, rows_missing_age: rows.filter((item) => !parseAgeRange(item.title).ageMin).length, title: camp.camp_name, start_date: camp.start_date, end_date: camp.end_date, matched_time: parseTimeRange(row.title).label, start_time: camp.start_time, end_time: camp.end_time, day_type: camp.half_day_or_full_day, price: camp.price, age_min: camp.age_min, age_max: camp.age_max, location: camp.address || camp.town, town: camp.town, county: camp.county, booking_url: camp.booking_url, source_method: sourceMethod }, confidence: camp.confidence, validationFailures: camp.extractionWarnings } satisfies ExtractionDebugCandidate; }); }
