@@ -858,7 +858,7 @@ button:disabled:hover {
 .camp-review-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 32rem), 1fr));
   margin-top: 1rem;
 }
 
@@ -868,17 +868,23 @@ button:disabled:hover {
   border-radius: 18px;
   display: grid;
   gap: 0.9rem;
+  min-width: 0;
+  overflow: hidden;
   padding: 1rem;
 }
 
 .camp-card-header {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .camp-review-card h3 {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .review-fields {
@@ -893,6 +899,7 @@ button:disabled:hover {
   border-radius: 12px;
   display: grid;
   gap: 0.25rem;
+  min-width: 0;
   padding: 0.7rem;
 }
 
@@ -904,11 +911,39 @@ button:disabled:hover {
 }
 
 .review-fields strong {
+  min-width: 0;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .warning-box.compact {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   padding: 0.75rem;
+}
+
+.warning-box.compact small {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.comparison-table {
+  border-collapse: collapse;
+  display: block;
+  font-size: 0.78rem;
+  margin-top: 0.4rem;
+  max-width: 100%;
+  overflow-x: auto;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.comparison-table th,
+.comparison-table td {
+  padding: 0.35rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .card-edit {

@@ -10,7 +10,13 @@ type CrawlPage = { url: string; text: string; readableTextLength: number; candid
 type SkippedUrl = { url: string; reason: string };
 
 function htmlToText(html: string) {
-  return html
+  const titleText = Array.from(html.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/gi)).map((match) => match[1]);
+  const shareTitleText = Array.from(html.matchAll(/<meta\b(?=[^>]*(?:property|name)=["'](?:og:title|twitter:title|title)["'])(?=[^>]*content=["']([^"']+)["'])[^>]*>/gi)).map((match) => match[1]);
+  const townVenueAttributeText = Array.from(html.matchAll(/<(?:a|img)\b[^>]*(?:title|alt|aria-label)=["']([^"']*[-–—][^"']*)["'][^>]*>/gi)).map((match) => match[1]);
+  const metadataText = [...titleText, ...shareTitleText, ...townVenueAttributeText]
+    .filter((value) => value && !/\b(?:index|follow|max-image-preview|max-snippet|max-video-preview|robots|canonical|noindex|nofollow)\b/i.test(value))
+    .join("\n");
+  const bodyText = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, "\n")
@@ -22,6 +28,7 @@ function htmlToText(html: string) {
     .replace(/&quot;/g, '"')
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  return `${metadataText}\n${bodyText}`.trim();
 }
 
 function extractLinks(html: string, baseUrl: string) {
