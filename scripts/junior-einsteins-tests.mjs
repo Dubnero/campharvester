@@ -162,6 +162,10 @@ Cost €198`).camps[0];
 assert.equal(greystonesCamp.town, 'Greystones');
 assert.equal(greystonesCamp.county, 'Wicklow');
 assert.notEqual(greystonesCamp.address, '');
+assert.equal(greystonesCamp.age_min, 5);
+assert.equal(greystonesCamp.age_max, 12);
+assert.equal(greystonesCamp.needs_review, true);
+assert.ok(greystonesCamp.extractionWarnings.includes('Age inferred from other Junior Einsteins summer camp listings'));
 assertCleanLocation(greystonesCamp);
 
 
@@ -203,6 +207,17 @@ Cost €198`).camps[0];
 assert.equal(knocklyonCamp.town, 'Knocklyon');
 assert.equal(knocklyonCamp.county, 'Dublin');
 assertCleanLocation(knocklyonCamp);
+
+
+const halloweenUrl = 'https://junioreinsteinsscienceclub.com/events/greystones-wicklow-science-halloween-camp-for-kids-monday-26th-to-friday-30th-october-9am-1pm-daily/';
+const halloweenCamp = extractDiscoveryRecords({ sourceUrl: halloweenUrl }, `Source URL: ${halloweenUrl}
+Greystones, Wicklow Science Halloween Camp
+Date Oct 26 2026 - Oct 30 2026
+Cost €198`).camps[0];
+assert.equal(halloweenCamp.holiday_type, 'Halloween');
+assert.equal(halloweenCamp.age_min, '');
+assert.equal(halloweenCamp.age_max, '');
+assert.ok(!halloweenCamp.extractionWarnings.includes('Age inferred from other Junior Einsteins summer camp listings'));
 
 const medicsUrl = 'https://junioreinsteinsscienceclub.com/events/junior-medics-science-camp-galway/';
 const medicsCamps = extractDiscoveryRecords({ sourceUrl: medicsUrl }, `Source URL: ${medicsUrl}
