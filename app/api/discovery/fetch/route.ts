@@ -3,6 +3,13 @@ import { NextResponse } from "next/server";
 const MAX_PAGES = 10;
 const MAX_STARCAMP_PAGES = 260;
 const MAX_JUNIOR_EINSTEINS_EVENT_PAGES = 50;
+const MAX_ALIVE_OUTSIDE_PACKAGE_PAGES = 20;
+const aliveOutsideFallbackPackageUrls = [
+  "https://www.aliveoutside.ie/activity-package/summer-camp-killruddery/",
+  "https://www.aliveoutside.ie/activity-package/summer-camp-tudgrangegorman/",
+  "https://www.aliveoutside.ie/activity-package/summer-camp-swords/",
+  "https://www.aliveoutside.ie/activity-package/summer-camp-thehighschool/",
+];
 const likelyCampLink = /\b(camps?|summer|easter|halloween|holiday|programme|program|book(?:ing)?|enrol|enroll|schedule|class)\b|profile\.php|selected_schedule|[?&]id=/i;
 // TODO: Add Google Maps/search discovery, franchise-wide crawling, and LLM extraction in later phases.
 const blockedLink = /\b(social|facebook|instagram|twitter|x\.com|linkedin|youtube|mailto:|tel:|maps?\.|google\.com\/maps|privacy|terms|cookie|login|account|cart|checkout|payment)\b/i;
@@ -81,6 +88,11 @@ function isRelatedDomain(source: URL, target: URL) {
   return sourceToken.length >= 4 && target.hostname.toLowerCase().includes(sourceToken);
 }
 
+function isAliveOutsideUrl(url: URL) { return isSameOrSubdomain(url.hostname, "aliveoutside.ie"); }
+function isAliveOutsideListingPage(url: URL) { return isAliveOutsideUrl(url) && /summer-camps-dublin-wicklow-2026-alive-outside-summer-camps\/?$/i.test(url.pathname); }
+function isAliveOutsideRejectedPage(url: URL) { return isAliveOutsideUrl(url) && /birthday|corporate|team-building|school-tour|sports|community|hell-and-back|splash-zone|teen-camp|testimonial|poster|asset|faq|blog|\.(?:png|jpe?g|gif|webp|svg|css|js)$/i.test(url.pathname); }
+function isAliveOutsideSummerCampPackagePage(url: URL) { return isAliveOutsideUrl(url) && !isAliveOutsideRejectedPage(url) && /\/activity-package\//i.test(url.pathname) && /summer-camp/i.test(url.pathname); }
+
 function isStarcampUrl(url: URL) { return isSameOrSubdomain(url.hostname, "starcamp.ie"); }
 function isJuniorEinsteinsUrl(url: URL) { return isSameOrSubdomain(url.hostname, "junioreinsteinsscienceclub.com"); }
 function isJuniorEinsteinsListingPage(url: URL) { return isJuniorEinsteinsUrl(url) && /science-camps-list-kids-childrens-camp\/?$/i.test(url.pathname); }
@@ -98,6 +110,11 @@ function linkDecision(source: URL, link: string) {
   let parsed: URL;
   try { parsed = new URL(link); } catch { return "Invalid URL"; }
   if (!["http:", "https:"].includes(parsed.protocol)) return "Unsupported protocol";
+  if (isAliveOutsideListingPage(source)) {
+    if (isAliveOutsideSummerCampPackagePage(parsed)) return "crawl";
+    if (isAliveOutsideRejectedPage(parsed)) return "Alive Outside rejected unrelated page";
+    return "Alive Outside listing crawl only follows standard summer camp package URLs";
+  }
   if (isStarcampListingPage(source)) {
     if (isStarcampProductPage(parsed) || isStarcampPaginationPage(parsed)) return "crawl";
     return "Starcamp listing crawl only follows product and pagination URLs";
@@ -149,7 +166,9 @@ export async function POST(request: Request) {
 
     let starcampListingMode = false;
     let juniorEinsteinsListingMode = false;
+    let aliveOutsideListingMode = false;
     let maxPages = MAX_PAGES;
+    let aliveOutsideFallbackUsed = false;
     const queue = [source.toString()];
     const queued = new Set(queue);
     const crawled = new Set<string>();
@@ -164,6 +183,10 @@ export async function POST(request: Request) {
       try {
         const { html, text } = await fetchPage(currentUrl);
         const currentParsed = new URL(currentUrl);
+        if (isAliveOutsideListingPage(currentParsed)) {
+          aliveOutsideListingMode = true;
+          maxPages = MAX_ALIVE_OUTSIDE_PACKAGE_PAGES + 1;
+        }
         if (isStarcampListingPage(currentParsed)) {
           starcampListingMode = true;
           maxPages = MAX_STARCAMP_PAGES;
@@ -173,14 +196,26 @@ export async function POST(request: Request) {
           maxPages = MAX_JUNIOR_EINSTEINS_EVENT_PAGES + 1;
         }
         const productPage = isStarcampProductPage(currentParsed);
+        const aliveOutsidePackagePage = isAliveOutsideSummerCampPackagePage(currentParsed);
         const juniorEinsteinsEventPage = isJuniorEinsteinsEventPage(currentParsed);
-        pages.push({ url: currentUrl, text, readableTextLength: text.length, candidateCount: starcampListingMode && !productPage ? 0 : juniorEinsteinsListingMode && !juniorEinsteinsEventPage ? 0 : campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text), status: "analysed", sourceMethod: "crawler", extractionBlocked: (starcampListingMode && !productPage) || (juniorEinsteinsListingMode && !juniorEinsteinsEventPage) });
-        const links = extractLinks(html, currentUrl).sort((a, b) => Number(isJuniorEinsteinsEventPage(new URL(b))) - Number(isJuniorEinsteinsEventPage(new URL(a))));
+        pages.push({ url: currentUrl, text, readableTextLength: text.length, candidateCount: aliveOutsideListingMode && !aliveOutsidePackagePage ? 0 : starcampListingMode && !productPage ? 0 : juniorEinsteinsListingMode && !juniorEinsteinsEventPage ? 0 : campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text), status: "analysed", sourceMethod: "crawler", extractionBlocked: (aliveOutsideListingMode && !aliveOutsidePackagePage) || (starcampListingMode && !productPage) || (juniorEinsteinsListingMode && !juniorEinsteinsEventPage) });
+        const extractedLinks = extractLinks(html, currentUrl);
+        const aliveOutsidePackageLinks = Array.from(new Set(extractedLinks.filter((link) => isAliveOutsideSummerCampPackagePage(new URL(link)))));
+        const links = (isAliveOutsideListingPage(currentParsed) && aliveOutsidePackageLinks.length === 0 ? [...aliveOutsideFallbackPackageUrls, ...extractedLinks] : extractedLinks)
+          .sort((a, b) => Number(isAliveOutsideSummerCampPackagePage(new URL(b))) - Number(isAliveOutsideSummerCampPackagePage(new URL(a))) || Number(isJuniorEinsteinsEventPage(new URL(b))) - Number(isJuniorEinsteinsEventPage(new URL(a))));
+        if (isAliveOutsideListingPage(currentParsed) && aliveOutsidePackageLinks.length === 0) aliveOutsideFallbackUsed = true;
+        let aliveOutsidePackagesQueued = pages.filter((page) => isAliveOutsideSummerCampPackagePage(new URL(page.url))).length + queue.filter((item) => isAliveOutsideSummerCampPackagePage(new URL(item))).length;
         for (const link of links) {
           discovered.add(link);
           if (queued.has(link) || crawled.has(link)) continue;
           const decision = linkDecision(source, link);
-          if (decision === "crawl") { queue.push(link); queued.add(link); }
+          if (decision === "crawl") {
+            if (isAliveOutsideListingPage(source) && isAliveOutsideSummerCampPackagePage(new URL(link))) {
+              if (aliveOutsidePackagesQueued >= MAX_ALIVE_OUTSIDE_PACKAGE_PAGES) { skipped.set(link, `Alive Outside package crawl cap reached (${MAX_ALIVE_OUTSIDE_PACKAGE_PAGES}).`); continue; }
+              aliveOutsidePackagesQueued += 1;
+            }
+            queue.push(link); queued.add(link);
+          }
           else skipped.set(link, decision);
         }
       } catch (error) {
@@ -202,6 +237,13 @@ export async function POST(request: Request) {
         discoveredUrls: Array.from(discovered),
         crawledUrls: pages.filter((page) => page.status === "analysed").map((page) => page.url),
         skippedUrls: Array.from(skipped.entries()).map(([skippedUrl, reason]) => ({ url: skippedUrl, reason } satisfies SkippedUrl)),
+        aliveOutside: aliveOutsideListingMode ? {
+          packageUrlsDiscovered: Array.from(discovered).filter((item) => isAliveOutsideSummerCampPackagePage(new URL(item))),
+          packageUrlsPrioritised: Array.from(discovered).filter((item) => isAliveOutsideSummerCampPackagePage(new URL(item))).slice(0, MAX_ALIVE_OUTSIDE_PACKAGE_PAGES),
+          packageUrlsCrawled: pages.filter((page) => isAliveOutsideSummerCampPackagePage(new URL(page.url)) && page.status === "analysed").map((page) => page.url),
+          packageUrlsSkipped: Array.from(skipped.keys()).filter((item) => isAliveOutsideSummerCampPackagePage(new URL(item))),
+          fallbackKnownUrlsUsed: aliveOutsideFallbackUsed,
+        } : undefined,
         juniorEinsteins: juniorEinsteinsListingMode ? {
           eventUrlsDiscovered: Array.from(discovered).filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length,
           eventUrlsCrawled: pages.filter((page) => isJuniorEinsteinsEventPage(new URL(page.url)) && page.status === "analysed").length,
