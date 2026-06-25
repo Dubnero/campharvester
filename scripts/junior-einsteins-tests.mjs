@@ -147,11 +147,15 @@ assertCleanLocation(brayCamp);
 const leopardstownUrl = 'https://junioreinsteinsscienceclub.com/events/summer-science-camp-for-kids-nord-anglia-international-school-leopardstown-dublin-18-monday-13th-to-friday-17th-july-9am-1pm-daily/';
 const leopardstownCamp = extractDiscoveryRecords({ sourceUrl: leopardstownUrl }, `Source URL: ${leopardstownUrl}
 Summer Science Camp for Kids -Nord Anglia International School, Leopardstown, Dublin 18
+Address: D18T672
 Date Jul 13 2026 - Jul 17 2026
 Cost €198`).camps[0];
 assert.equal(leopardstownCamp.town, 'Leopardstown');
 assert.equal(leopardstownCamp.county, 'Dublin');
 assert.equal(leopardstownCamp.address, 'Nord Anglia International School, Leopardstown, Dublin 18');
+assert.notEqual(leopardstownCamp.town, 'D18T672');
+assert.notEqual(leopardstownCamp.address, 'D18T672');
+assert.equal(leopardstownCamp.eircode, 'D18 T672');
 assertCleanLocation(leopardstownCamp);
 
 const greystonesUrl = 'https://junioreinsteinsscienceclub.com/events/summer-science-camp-for-kids-greystones-wicklow-monday-13th-to-friday-17th-july-9am-1pm-daily/';
@@ -169,6 +173,29 @@ assert.ok(greystonesCamp.extractionWarnings.includes('Age inferred from other Ju
 assertCleanLocation(greystonesCamp);
 
 
+
+const tuamUrl = 'https://junioreinsteinsscienceclub.com/events/summer-science-camp-for-kids-family-resource-center-tuam-galway-monday-27th-to-friday-31st-july-9am-1pm-daily/';
+const tuamCamp = extractDiscoveryRecords({ sourceUrl: tuamUrl }, `Source URL: ${tuamUrl}
+Summer Science Camp for Kids Family Resource Center Tuam Galway
+Date Jul 27 2026 - Jul 31 2026
+Cost €198`).camps[0];
+assert.equal(tuamCamp.address, 'Family Resource Center');
+assert.equal(tuamCamp.town, 'Tuam');
+assert.equal(tuamCamp.county, 'Galway');
+assert.notEqual(tuamCamp.town, 'Galway');
+
+const naasUrl = 'https://junioreinsteinsscienceclub.com/events/naas-kildare-science-summer-camp-for-children-at-naas-gaa-club-monday-10th-to-friday-14th-august-9am-1pm-daily/';
+const naasCamp = extractDiscoveryRecords({ sourceUrl: naasUrl }, `Source URL: ${naasUrl}
+Naas, Kildare Science Summer Camp for children at Naas GAA Club
+Date Aug 10 2026 - Aug 14 2026
+Cost €198`).camps[0];
+assert.equal(naasCamp.address, 'Naas GAA Club');
+assert.equal(naasCamp.town, 'Naas');
+assert.equal(naasCamp.county, 'Kildare');
+assert.equal(naasCamp.age_min, 5);
+assert.equal(naasCamp.age_max, 12);
+assert.ok(naasCamp.extractionWarnings.includes('Age inferred from other Junior Einsteins summer camp listings'));
+
 const castleknockUrl = 'https://junioreinsteinsscienceclub.com/events/castleknock-dublin-science-summer-camp-for-kids-monday-6th-to-friday-10th-july-9am-1pm-daily/';
 const castleknockCamp = extractDiscoveryRecords({ sourceUrl: castleknockUrl }, `Source URL: ${castleknockUrl}
 Castleknock, Dublin – Science Summer Camp for kids
@@ -177,6 +204,8 @@ Date Jul 06 2026 - Jul 10 2026
 Cost €198`).camps[0];
 assert.equal(castleknockCamp.town, 'Castleknock');
 assert.equal(castleknockCamp.county, 'Dublin');
+assert.notEqual(castleknockCamp.town, 'D15 DK54');
+assert.notEqual(castleknockCamp.address, 'D15 DK54');
 assertCleanLocation(castleknockCamp);
 
 const maynoothUrl = 'https://junioreinsteinsscienceclub.com/events/maynooth-kildare-science-summer-camp-for-children-at-maynooth-university-monday-6th-july-to-friday-10th-july-9am-1pm-daily/';
@@ -230,4 +259,10 @@ Junior Astronauts Science camp Galway
 Date Jul 13 2026 - Jul 13 2026`).camps;
 assert.equal(astronautsCamps.length, 0);
 
+for (const camp of [eventCamps[0], rosemontCamp, claregalwayCamp, glenagearyCamp, brayCamp, leopardstownCamp, greystonesCamp, tuamCamp, naasCamp, castleknockCamp, maynoothCamp, celbridgeCamp, knocklyonCamp]) {
+  assert.equal(/^[A-Z]\d{2}\s?[A-Z0-9]{4}$/i.test(String(camp.town)), false);
+  assert.equal(/^[A-Z]\d{2}\s?[A-Z0-9]{4}$/i.test(String(camp.address)), false);
+  assert.notEqual(camp.age_min, 0);
+  assert.notEqual(camp.age_max, 0);
+}
 console.log('Junior Einsteins tests passed');

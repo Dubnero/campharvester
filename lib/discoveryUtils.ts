@@ -239,15 +239,20 @@ function cleanJuniorEinsteinsAddress(value: string) {
     .replace(/[.;]+$/g, "")
     .trim();
 }
+
+function juniorEinsteinsEircode(value: string) { const match = (value.match(eircodeRegex)?.[0] ?? "").toUpperCase().replace(/\s+/, " "); return match && !match.includes(" ") ? `${match.slice(0, 3)} ${match.slice(3)}` : match; }
+function stripJuniorEinsteinsEircode(value: string) { return cleanJuniorEinsteinsAddress(value.replace(eircodeRegex, "").replace(/\bDublin\s*\d{1,2}\s*$/i, "Dublin 18")); }
+function isJuniorEinsteinsUnsafeLocationOnly(value: string) { const cleaned = cleanJuniorEinsteinsAddress(value); return !cleaned || Boolean(juniorEinsteinsEircode(cleaned)) && cleaned.replace(eircodeRegex, "").trim() === "" || counties.some((county) => county.toLowerCase() === cleaned.replace(/^Co\.?\s+/i, "").replace(/^County\s+/i, "").toLowerCase()); }
+
 function juniorEinsteinsExplicitAddress(text: string) {
   const addressBlock = text.match(/(?:^|\n)\s*(?:[•\-–—*]\s*)?Address\s*:?\s*([\s\S]{0,240}?)(?=\n\s*(?:Date|Time|Cost|Age Groups?|Suitable|Share|Book now|€)\b|$)/i);
   const blockAddress = cleanJuniorEinsteinsAddress(addressBlock?.[1]?.replace(/\n+/g, " ") || "");
-  if (blockAddress.includes(",")) return blockAddress;
+  if (blockAddress.includes(",") && !isJuniorEinsteinsUnsafeLocationOnly(blockAddress)) return blockAddress;
   const lines = juniorEinsteinsLines(text);
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     const sameLine = line.match(/^Address\s*:?\s*(.+)$/i);
-    if (sameLine?.[1]) return cleanJuniorEinsteinsAddress(sameLine[1]);
+    if (sameLine?.[1]) { const cleaned = cleanJuniorEinsteinsAddress(sameLine[1]); if (!isJuniorEinsteinsUnsafeLocationOnly(cleaned)) return cleaned; }
     if (/^Address\s*:?$/i.test(line)) {
       const next = lines.slice(index + 1, index + 4).find((candidate) => candidate.includes(",") && !/^(Date|Time|Cost|Age Groups?)\s*:?/i.test(candidate));
       if (next) return cleanJuniorEinsteinsAddress(next);
@@ -270,6 +275,10 @@ function parseJuniorEinsteinsEventLocation(sourceUrl: string, pageText: string) 
   const slug = juniorEinsteinsEventSlug(sourceUrl).replace(/-/g, " ");
   const title = `${pageText.split(/\n/).find((line) => /science.*camp/i.test(line)) || ""} ${slug}`;
   const locationText = `${title} ${pageText}`;
+  if (/family resource cent(?:er|re)/i.test(locationText) && /tuam/i.test(locationText)) return { town: "Tuam", county: "Galway", address: "Family Resource Center" };
+  if (/westside resource cent(?:er|re)/i.test(locationText)) return { town: "Galway", county: "Galway", address: "Westside Resource Center" };
+  if (/naas gaa club/i.test(locationText) || /naas/i.test(locationText) && /kildare/i.test(locationText)) return { town: "Naas", county: "Kildare", address: /naas gaa club/i.test(locationText) ? "Naas GAA Club" : "Naas, Kildare" };
+  if (/newbridge educate together ns/i.test(locationText) || /newbridge/i.test(locationText) && /kildare/i.test(locationText)) return { town: "Newbridge", county: "Kildare", address: /newbridge educate together ns/i.test(locationText) ? "Newbridge Educate Together NS" : "Newbridge, Kildare" };
   if (/scoil na mainistreach/i.test(locationText) || /celbridge/i.test(locationText) && /kildare/i.test(locationText)) return { town: "Celbridge", county: "Kildare", address: /scoil na mainistreach/i.test(locationText) ? "Scoil na Mainistreach, Celbridge" : "Celbridge, Kildare" };
   if (/castleknock/i.test(locationText) && /dublin/i.test(locationText)) return { town: "Castleknock", county: "Dublin", address: "Castleknock, Dublin" };
   if (/knocklyon/i.test(locationText) && /dublin/i.test(locationText)) return { town: "Knocklyon", county: "Dublin", address: "Knocklyon, Dublin" };
@@ -311,11 +320,13 @@ function parseJuniorEinsteinsAge(text: string) {
 function juniorEinsteinsLocationContaminated(value: string) {
   return /Dates?\s*&\s*Times?|Date\s+and\s+time|Cost|Age\s*Groups?|Ages:|\bdaily\b|\b(?:Monday|Tuesday|Wednesday|Thursday|Friday)\b/i.test(value);
 }
-function sanitizeJuniorEinsteinsLocation(location: { town: string; county: string; address: string }, sourceUrl: string) {
-  const cleaned = { town: cleanJuniorEinsteinsAddress(location.town), county: cleanJuniorEinsteinsAddress(location.county), address: cleanJuniorEinsteinsAddress(location.address) };
-  if (!juniorEinsteinsLocationContaminated(`${cleaned.town} ${cleaned.address}`)) return cleaned;
+function sanitizeJuniorEinsteinsLocation(location: { town: string; county: string; address: string; eircode?: string }, sourceUrl: string) {
+  const eircode = location.eircode || juniorEinsteinsEircode(`${location.town} ${location.address}`);
+  const cleaned = { town: cleanJuniorEinsteinsAddress(location.town.replace(eircodeRegex, "")), county: cleanJuniorEinsteinsAddress(location.county), address: cleanJuniorEinsteinsAddress(location.address.replace(eircodeRegex, "")), eircode };
+  const unsafe = isJuniorEinsteinsUnsafeLocationOnly(cleaned.town) || isJuniorEinsteinsUnsafeLocationOnly(cleaned.address);
+  if (!unsafe && !juniorEinsteinsLocationContaminated(`${cleaned.town} ${cleaned.address}`)) return cleaned;
   const fallback = parseJuniorEinsteinsEventLocation(sourceUrl, "");
-  return { town: cleanJuniorEinsteinsAddress(fallback.town), county: cleanJuniorEinsteinsAddress(fallback.county), address: cleanJuniorEinsteinsAddress(fallback.address) };
+  return { town: cleanJuniorEinsteinsAddress(fallback.town), county: cleanJuniorEinsteinsAddress(fallback.county), address: isJuniorEinsteinsUnsafeLocationOnly(fallback.address) ? "" : cleanJuniorEinsteinsAddress(fallback.address), eircode };
 }
 
 function juniorEinsteinsEventRows(rawText: string, input: DiscoveryInput) {
@@ -327,6 +338,7 @@ function juniorEinsteinsEventRows(rawText: string, input: DiscoveryInput) {
     if (!dateRange) return null;
     const time = parseJuniorEinsteinsSlugTime(slug).label ? parseJuniorEinsteinsSlugTime(slug) : parseTimeRange(block.text);
     const location = sanitizeJuniorEinsteinsLocation(parseJuniorEinsteinsEventLocation(url, block.text), url);
+    if (!location.eircode) location.eircode = juniorEinsteinsEircode(block.text);
     const holiday = juniorEinsteinsHoliday(`${slug} ${block.text}`, input.holidayType?.trim());
     return { dateRange, title: `${slug} ${block.text}`.trim(), countyLabel: location.county, bookingUrl: url, matched: true, time, location, holiday, sourceUrl: url, price: parseJuniorEinsteinsPrice(block.text), age: parseJuniorEinsteinsAge(block.text) };
   }).filter((row): row is NonNullable<typeof row> => Boolean(row));
@@ -348,7 +360,7 @@ function buildJuniorEinsteinsCamp(row: (ReturnType<typeof juniorEinsteinsListing
   const price = "price" in row ? row.price : "";
   const warnings = [price ? "" : "No price detected", shouldInferSummerAge ? "Age inferred from other Junior Einsteins summer camp listings" : age.ageMin ? "" : "Age requires review", row.matched ? "" : "Booking URL requires review"].filter(Boolean);
   const fieldConfidence = { camp_name: 96, county: location.county ? 92 : 0, town: location.town ? 90 : 0, address: location.address ? 82 : 0, eircode: 0, activity_type: 98, holiday_type: holiday !== "Other" ? 92 : 30, age: age.ageMin ? (shouldInferSummerAge ? 55 : 85) : 0, start_date: 98, price: price ? 100 : 0, booking_url: row.matched ? 90 : 55 };
-  return { camp_id: slugify(`junior-einsteins-${location.address || location.town}-${row.dateRange.startDate}`), provider_id: input.providerId?.trim() || "junior-einsteins-science-club", camp_name: juniorEinsteinsCampName(holiday), county: location.county, town: location.town, address: location.address, eircode: "", activity_type: "STEM", holiday_type: holiday, age_min: age.ageMin || ("" as unknown as number), age_max: age.ageMax || ("" as unknown as number), start_date: row.dateRange.startDate, end_date: row.dateRange.endDate, start_time: time.startTime, end_time: time.endTime, half_day_or_full_day: inferDayType(time.startTime, time.endTime), price, booking_url: row.bookingUrl, status: "draft", verified: false, featured: false, source_url: "sourceUrl" in row ? row.sourceUrl : input.sourceUrl, last_checked: today(), selected: true, needs_review: warnings.length > 0, duplicateWarnings: [], confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 1, start_date: 3, price: 1, booking_url: 1, activity_type: 1 }), fieldConfidence, extractionWarnings: warnings, source_method: sourceMethod };
+  return { camp_id: slugify(`junior-einsteins-${location.address || location.town}-${row.dateRange.startDate}`), provider_id: input.providerId?.trim() || "junior-einsteins-science-club", camp_name: juniorEinsteinsCampName(holiday), county: location.county, town: location.town, address: location.address, eircode: location.eircode || "", activity_type: "STEM", holiday_type: holiday, age_min: age.ageMin || ("" as unknown as number), age_max: age.ageMax || ("" as unknown as number), start_date: row.dateRange.startDate, end_date: row.dateRange.endDate, start_time: time.startTime, end_time: time.endTime, half_day_or_full_day: inferDayType(time.startTime, time.endTime), price, booking_url: row.bookingUrl, status: "draft", verified: false, featured: false, source_url: "sourceUrl" in row ? row.sourceUrl : input.sourceUrl, last_checked: today(), selected: true, needs_review: warnings.length > 0, duplicateWarnings: [], confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 1, start_date: 3, price: 1, booking_url: 1, activity_type: 1 }), fieldConfidence, extractionWarnings: warnings, source_method: sourceMethod };
 }
 
 function extractJuniorEinsteinsCamps(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) { const eventRows = juniorEinsteinsEventRows(rawText, input); const fallbackRows = eventRows.length ? [] : juniorEinsteinsListingRows(rawText, input); return (eventRows.length ? eventRows : fallbackRows).map((row) => buildJuniorEinsteinsCamp(row, input, sourceMethod)); }
