@@ -242,7 +242,7 @@ function cleanJuniorEinsteinsAddress(value: string) {
 
 function juniorEinsteinsEircode(value: string) { const match = (value.match(eircodeRegex)?.[0] ?? "").toUpperCase().replace(/\s+/, " "); return match && !match.includes(" ") ? `${match.slice(0, 3)} ${match.slice(3)}` : match; }
 function stripJuniorEinsteinsEircode(value: string) { return cleanJuniorEinsteinsAddress(value.replace(eircodeRegex, "").replace(/\bDublin\s*\d{1,2}\s*$/i, "Dublin 18")); }
-function isJuniorEinsteinsUnsafeLocationOnly(value: string) { const cleaned = cleanJuniorEinsteinsAddress(value); return !cleaned || Boolean(juniorEinsteinsEircode(cleaned)) && cleaned.replace(eircodeRegex, "").trim() === "" || counties.some((county) => county.toLowerCase() === cleaned.replace(/^Co\.?\s+/i, "").replace(/^County\s+/i, "").toLowerCase()); }
+function isJuniorEinsteinsUnsafeLocationOnly(value: string) { const cleaned = cleanJuniorEinsteinsAddress(value); return !cleaned || /^[\s:,.\-–—]+$/.test(cleaned) || Boolean(juniorEinsteinsEircode(cleaned)) && cleaned.replace(eircodeRegex, "").trim() === "" || counties.some((county) => county.toLowerCase() === cleaned.replace(/^Co\.?\s+/i, "").replace(/^County\s+/i, "").toLowerCase()); }
 
 function juniorEinsteinsExplicitAddress(text: string) {
   const addressBlock = text.match(/(?:^|\n)\s*(?:[•\-–—*]\s*)?Address\s*:?\s*([\s\S]{0,240}?)(?=\n\s*(?:Date|Time|Cost|Age Groups?|Suitable|Share|Book now|€)\b|$)/i);
@@ -361,6 +361,24 @@ function buildJuniorEinsteinsCamp(row: (ReturnType<typeof juniorEinsteinsListing
   const warnings = [price ? "" : "No price detected", shouldInferSummerAge ? "Age inferred from other Junior Einsteins summer camp listings" : age.ageMin ? "" : "Age requires review", row.matched ? "" : "Booking URL requires review"].filter(Boolean);
   const fieldConfidence = { camp_name: 96, county: location.county ? 92 : 0, town: location.town ? 90 : 0, address: location.address ? 82 : 0, eircode: 0, activity_type: 98, holiday_type: holiday !== "Other" ? 92 : 30, age: age.ageMin ? (shouldInferSummerAge ? 55 : 85) : 0, start_date: 98, price: price ? 100 : 0, booking_url: row.matched ? 90 : 55 };
   return { camp_id: slugify(`junior-einsteins-${location.address || location.town}-${row.dateRange.startDate}`), provider_id: input.providerId?.trim() || "junior-einsteins-science-club", camp_name: juniorEinsteinsCampName(holiday), county: location.county, town: location.town, address: location.address, eircode: location.eircode || "", activity_type: "STEM", holiday_type: holiday, age_min: age.ageMin || ("" as unknown as number), age_max: age.ageMax || ("" as unknown as number), start_date: row.dateRange.startDate, end_date: row.dateRange.endDate, start_time: time.startTime, end_time: time.endTime, half_day_or_full_day: inferDayType(time.startTime, time.endTime), price, booking_url: row.bookingUrl, status: "draft", verified: false, featured: false, source_url: "sourceUrl" in row ? row.sourceUrl : input.sourceUrl, last_checked: today(), selected: true, needs_review: warnings.length > 0, duplicateWarnings: [], confidence: confidenceScore(fieldConfidence, { camp_name: 3, holiday_type: 2, age: 1, start_date: 3, price: 1, booking_url: 1, activity_type: 1 }), fieldConfidence, extractionWarnings: warnings, source_method: sourceMethod };
+}
+
+function shouldInferJuniorEinsteinsFinalAge(camp: DiscoveryCamp) {
+  const sourceText = `${camp.source_url} ${camp.booking_url} ${camp.camp_name}`;
+  return camp.provider_id === "junior-einsteins-science-club"
+    && camp.holiday_type === "Summer"
+    && /Science Summer Camp/i.test(camp.camp_name)
+    && Boolean(camp.start_date && camp.end_date && camp.start_date !== camp.end_date)
+    && (!camp.age_min || Number(camp.age_min) <= 0)
+    && (!camp.age_max || Number(camp.age_max) <= 0)
+    && !/junior[-\s]+(?:medics|astronauts)|birthday|party|after[-\s]?school|workshop|one[-\s]?off/i.test(sourceText);
+}
+function normalizeJuniorEinsteinsFinalCamp(camp: DiscoveryCamp): DiscoveryCamp {
+  const fallbackLocation = sanitizeJuniorEinsteinsLocation({ town: camp.town, county: camp.county, address: camp.address, eircode: camp.eircode }, camp.source_url || camp.booking_url);
+  const normalized: DiscoveryCamp = { ...camp, town: fallbackLocation.town, county: fallbackLocation.county || camp.county, address: fallbackLocation.address, eircode: fallbackLocation.eircode || camp.eircode };
+  if (!shouldInferJuniorEinsteinsFinalAge(normalized)) return normalized;
+  const warnings = Array.from(new Set([...normalized.extractionWarnings.filter((warning) => warning !== "Age requires review"), "Age inferred from other Junior Einsteins summer camp listings"]));
+  return { ...normalized, age_min: 5, age_max: 12, needs_review: true, extractionWarnings: warnings, fieldConfidence: { ...normalized.fieldConfidence, age: Math.max(normalized.fieldConfidence.age ?? 0, 55) } };
 }
 
 function extractJuniorEinsteinsCamps(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod) { const eventRows = juniorEinsteinsEventRows(rawText, input); const fallbackRows = eventRows.length ? [] : juniorEinsteinsListingRows(rawText, input); return (eventRows.length ? eventRows : fallbackRows).map((row) => buildJuniorEinsteinsCamp(row, input, sourceMethod)); }
@@ -921,7 +939,8 @@ export function extractDiscoveryRecords(input: DiscoveryInput, rawText: string, 
   const starcampSource = isStarcampSource(input, rawText, providerName);
   const starcampCamps = starcampSource ? extractStarcampCamps(rawText, input, sourceMethod) : [];
   const bricksCamps = /bricks\s*4\s*kidz|profile\.php|selected_schedule|south county dublin/i.test(`${rawText} ${input.sourceUrl} ${providerName}`) ? extractBricksBookingCamps(rawText, input, providerName, providerId, county, sourceMethod) : [];
-  const camps = dedupeDiscoveryCamps(juniorEinsteinsCamps.length ? juniorEinsteinsCamps : brayCamps.length ? brayCamps : starcampSource ? starcampCamps : bricksCamps.length ? bricksCamps : genericCamps);
+  const extractedCamps = dedupeDiscoveryCamps(juniorEinsteinsCamps.length ? juniorEinsteinsCamps : brayCamps.length ? brayCamps : starcampSource ? starcampCamps : bricksCamps.length ? bricksCamps : genericCamps);
+  const camps = isJuniorEinsteins ? extractedCamps.map(normalizeJuniorEinsteinsFinalCamp) : extractedCamps;
   const manualEmptyWarning = sourceMethod === "manual_paste" && rawText.trim() && camps.length === 0 ? "Manual text was added, but no camps could be extracted. Check extraction patterns or paste a more complete section." : "";
   const warnings = [providerName ? "" : "Provider name could not be determined.", starcampSource && !isStarcampProductSourceUrl(input.sourceUrl) ? "Starcamp listing/index page skipped for camp extraction; product pages are required." : "", manualEmptyWarning || (camps.length ? "" : "No high-confidence camp offerings found; generic navigation items were ignored."), camps.length && camps.every((camp) => !camp.price) ? "No prices detected" : "", camps.some((camp) => !camp.start_date) ? `${camps.filter((camp) => !camp.start_date).length} camp(s) missing dates` : "", camps.some((camp) => !camp.booking_url) ? "Booking links not detected for all camps" : ""].filter(Boolean);
   return { providers: provider.provider_id || provider.provider_name ? [normalizeExtractedProvider(provider)] : [], camps: camps.map(normalizeExtractedCamp), warnings, textLength: text.length };

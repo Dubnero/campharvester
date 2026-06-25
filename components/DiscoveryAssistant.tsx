@@ -19,7 +19,8 @@ const providerFields: Array<keyof DiscoveryProvider> = ["selected", "needs_revie
 const campFields: Array<keyof DiscoveryCamp> = ["selected", "needs_review", "camp_id", "provider_id", "camp_name", "county", "town", "address", "eircode", "activity_type", "holiday_type", "age_min", "age_max", "start_date", "end_date", "start_time", "end_time", "half_day_or_full_day", "price", "booking_url", "status"];
 
 function label(field: string) { return field.replaceAll("_", " "); }
-function uniqueOptions(values: string[]) { return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)); }
+export function isMeaningfulFilterOption(value: string) { const trimmed = value.trim(); return Boolean(trimmed) && !/^[\s:,.\-–—]+$/.test(trimmed) && !/^[A-Z]\d{2}\s?[A-Z0-9]{4}$/i.test(trimmed) && !/^(?:unknown|n\/?a|none|null|undefined|-)$/i.test(trimmed); }
+export function uniqueOptions(values: string[]) { return Array.from(new Set(values.map((value) => value.trim()).filter(isMeaningfulFilterOption))).sort((a, b) => a.localeCompare(b)); }
 function normalizedIncludes(value: string | number | boolean | undefined, search: string) { return String(value ?? "").toLowerCase().includes(search.trim().toLowerCase()); }
 function campStableKey(camp: Pick<DiscoveryCamp, "camp_id" | "provider_id" | "camp_name" | "town" | "start_date" | "end_date" | "booking_url">) { return [camp.camp_id, camp.provider_id, camp.camp_name, camp.town, camp.start_date, camp.end_date, camp.booking_url].map((value) => String(value ?? "").trim().toLowerCase()).join("|"); }
 function methodBadge(method: DiscoveryProvider["source_method"] | DiscoveryCamp["source_method"]) { return method === "manual_paste" ? "📋 Manual" : "🕷 Crawled"; }

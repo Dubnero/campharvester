@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { extractDiscoveryRecords } from '../lib/discoveryUtils.ts';
+import { uniqueOptions } from '../components/DiscoveryAssistant.tsx';
 
 const input = { sourceUrl: 'https://junioreinsteinsscienceclub.com/science-camps-list-kids-childrens-camp/' };
 const forbiddenLocationText = /Dates & Times|Ages:|Cost|daily/i;
@@ -133,6 +134,7 @@ assert.notEqual(glenagearyCamp.address, '');
 assert.notEqual(glenagearyCamp.age_min, 0);
 assert.notEqual(glenagearyCamp.age_max, 0);
 assertCleanLocation(glenagearyCamp);
+assert.equal([glenagearyCamp.town, glenagearyCamp.county].filter(Boolean).join(', '), 'Glenageary, Dublin');
 
 const brayUrl = 'https://junioreinsteinsscienceclub.com/events/bray-wicklow-summer-science-camp-for-kids-monday-20th-to-friday-24th-july-9am-1pm-daily-at-festina-lente-equestrian-centre/';
 const brayCamp = extractDiscoveryRecords({ sourceUrl: brayUrl }, `Source URL: ${brayUrl}
@@ -157,6 +159,20 @@ assert.notEqual(leopardstownCamp.town, 'D18T672');
 assert.notEqual(leopardstownCamp.address, 'D18T672');
 assert.equal(leopardstownCamp.eircode, 'D18 T672');
 assertCleanLocation(leopardstownCamp);
+
+
+const nordAngliaPunctuationUrl = 'https://junioreinsteinsscienceclub.com/events/summer-science-camp-for-kids-nord-anglia-international-school-leopardstown-dublin-18-tuesday-4th-to-friday-7th-august-9am-1pm-daily/';
+const nordAngliaPunctuationCamp = extractDiscoveryRecords({ sourceUrl: nordAngliaPunctuationUrl }, `Source URL: ${nordAngliaPunctuationUrl}
+Summer Science Camp for Kids -Nord Anglia International School, Leopardstown, Dublin 18
+Address: :
+Date Aug 04 2026 - Aug 07 2026
+Cost €198`).camps[0];
+assert.equal(nordAngliaPunctuationCamp.town, 'Leopardstown');
+assert.equal(nordAngliaPunctuationCamp.county, 'Dublin');
+assert.equal(nordAngliaPunctuationCamp.address, 'Nord Anglia International School, Leopardstown, Dublin 18');
+assert.notEqual(nordAngliaPunctuationCamp.town, ':');
+assert.notEqual(nordAngliaPunctuationCamp.address, ':');
+assertCleanLocation(nordAngliaPunctuationCamp);
 
 const greystonesUrl = 'https://junioreinsteinsscienceclub.com/events/summer-science-camp-for-kids-greystones-wicklow-monday-13th-to-friday-17th-july-9am-1pm-daily/';
 const greystonesCamp = extractDiscoveryRecords({ sourceUrl: greystonesUrl }, `Source URL: ${greystonesUrl}
@@ -272,10 +288,11 @@ Junior Astronauts Science camp Galway
 Date Jul 13 2026 - Jul 13 2026`).camps;
 assert.equal(astronautsCamps.length, 0);
 
-for (const camp of [eventCamps[0], rosemontCamp, claregalwayCamp, glenagearyCamp, brayCamp, leopardstownCamp, greystonesCamp, tuamCamp, naasCamp, naasJulyCamp, castleknockCamp, maynoothCamp, celbridgeCamp, knocklyonCamp]) {
+for (const camp of [eventCamps[0], rosemontCamp, claregalwayCamp, glenagearyCamp, brayCamp, leopardstownCamp, nordAngliaPunctuationCamp, greystonesCamp, tuamCamp, naasCamp, naasJulyCamp, castleknockCamp, maynoothCamp, celbridgeCamp, knocklyonCamp]) {
   assert.equal(/^[A-Z]\d{2}\s?[A-Z0-9]{4}$/i.test(String(camp.town)), false);
   assert.equal(/^[A-Z]\d{2}\s?[A-Z0-9]{4}$/i.test(String(camp.address)), false);
   assert.notEqual(camp.age_min, 0);
   assert.notEqual(camp.age_max, 0);
 }
+assert.deepEqual(uniqueOptions([':', ' ', 'D18 T672', 'Glenageary', 'Greystones', '-', 'Naas']), ['Glenageary', 'Greystones', 'Naas']);
 console.log('Junior Einsteins tests passed');
