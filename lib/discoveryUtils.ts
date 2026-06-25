@@ -325,6 +325,7 @@ function sanitizeJuniorEinsteinsLocation(location: { town: string; county: strin
   const eircode = location.eircode || juniorEinsteinsEircode(`${location.town} ${location.address}`);
   const cleaned = { town: cleanJuniorEinsteinsAddress(location.town.replace(eircodeRegex, "")), county: cleanJuniorEinsteinsAddress(location.county), address: cleanJuniorEinsteinsAddress(location.address.replace(eircodeRegex, "")), eircode };
   if (/\bgreystones[-\s]+wicklow\b/i.test(sourceUrl) || /\bGreystones\b/i.test(cleaned.address) && /\b(?:Co\.?\s*)?Wicklow\b|\bCounty\s+Wicklow\b/i.test(cleaned.address)) return { ...cleaned, town: "Greystones", county: "Wicklow" };
+  if (/\bglenageary[-\s]+dublin\b/i.test(sourceUrl) || /\bGlenageary\b/i.test(`${cleaned.town} ${cleaned.address}`) && /\bDublin\b/i.test(`${sourceUrl} ${cleaned.address}`)) return { ...cleaned, town: "Glenageary", county: "Dublin" };
   const unsafe = isJuniorEinsteinsUnsafeLocationOnly(cleaned.town) || isJuniorEinsteinsUnsafeLocationOnly(cleaned.address);
   if (!unsafe && !juniorEinsteinsLocationContaminated(`${cleaned.town} ${cleaned.address}`)) return cleaned;
   const fallback = parseJuniorEinsteinsEventLocation(sourceUrl, "");

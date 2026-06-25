@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { extractDiscoveryRecords } from '../lib/discoveryUtils.ts';
 import { uniqueOptions } from '../components/DiscoveryAssistant.tsx';
+import { formatLocationLines } from '../lib/publicDirectoryUtils.ts';
 
 const input = { sourceUrl: 'https://junioreinsteinsscienceclub.com/science-camps-list-kids-childrens-camp/' };
 const forbiddenLocationText = /Dates & Times|Ages:|Cost|daily/i;
@@ -138,6 +139,8 @@ assert.notEqual(glenagearyCamp.age_min, 0);
 assert.notEqual(glenagearyCamp.age_max, 0);
 assertCleanLocation(glenagearyCamp);
 assert.equal([glenagearyCamp.town, glenagearyCamp.county].filter(Boolean).join(', '), 'Glenageary, Dublin');
+assert.equal(formatLocationLines(glenagearyCamp).primary, 'Glenageary, Dublin');
+assert.equal(glenagearyCamp.town, 'Glenageary');
 
 const brayUrl = 'https://junioreinsteinsscienceclub.com/events/bray-wicklow-summer-science-camp-for-kids-monday-20th-to-friday-24th-july-9am-1pm-daily-at-festina-lente-equestrian-centre/';
 const brayCamp = extractDiscoveryRecords({ sourceUrl: brayUrl }, `Source URL: ${brayUrl}
