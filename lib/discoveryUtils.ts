@@ -347,8 +347,8 @@ function juniorEinsteinsEventRows(rawText: string, input: DiscoveryInput) {
 function isStandardJuniorEinsteinsSummerCamp(title: string, holiday: HolidayType, dateRange: { startDate: string; endDate: string }) {
   return holiday === "Summer"
     && Boolean(dateRange.startDate && dateRange.endDate && dateRange.startDate !== dateRange.endDate)
-    && /(?:science[-\s]+summer[-\s]+camp|summer[-\s]+science[-\s]+camp|summer.*science.*camp|science.*summer.*camp)/i.test(title)
-    && !/junior\s+(?:medics|astronauts)|birthday|after[-\s]?school|workshops?/i.test(title);
+    && /\bcamp\b/i.test(title)
+    && !/junior\s+(?:medics|astronauts)|birthday|party|after[-\s]?school|workshops?/i.test(title);
 }
 function buildJuniorEinsteinsCamp(row: (ReturnType<typeof juniorEinsteinsListingRows>[number] | ReturnType<typeof juniorEinsteinsEventRows>[number]), input: DiscoveryInput, sourceMethod: SourceMethod): DiscoveryCamp {
   const holiday = "holiday" in row ? row.holiday : juniorEinsteinsHoliday(`${row.title} ${row.dateRange.label}`, input.holidayType?.trim());

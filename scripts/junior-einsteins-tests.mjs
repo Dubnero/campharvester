@@ -196,6 +196,19 @@ assert.equal(naasCamp.age_min, 5);
 assert.equal(naasCamp.age_max, 12);
 assert.ok(naasCamp.extractionWarnings.includes('Age inferred from other Junior Einsteins summer camp listings'));
 
+
+const naasJulyUrl = 'https://junioreinsteinsscienceclub.com/events/naas-kildare-science-summer-camp-for-children-at-naas-gaa-club-monday-27th-to-friday-31st-july-9am-1pm-daily/';
+const naasJulyCamp = extractDiscoveryRecords({ sourceUrl: naasJulyUrl }, `Source URL: ${naasJulyUrl}
+Naas, Kildare Science Summer Camp for children at Naas GAA Club
+Date Jul 27 2026 - Jul 31 2026
+Cost €198`).camps[0];
+assert.equal(naasJulyCamp.address, 'Naas GAA Club');
+assert.equal(naasJulyCamp.town, 'Naas');
+assert.equal(naasJulyCamp.county, 'Kildare');
+assert.equal(naasJulyCamp.age_min, 5);
+assert.equal(naasJulyCamp.age_max, 12);
+assert.ok(naasJulyCamp.extractionWarnings.includes('Age inferred from other Junior Einsteins summer camp listings'));
+
 const castleknockUrl = 'https://junioreinsteinsscienceclub.com/events/castleknock-dublin-science-summer-camp-for-kids-monday-6th-to-friday-10th-july-9am-1pm-daily/';
 const castleknockCamp = extractDiscoveryRecords({ sourceUrl: castleknockUrl }, `Source URL: ${castleknockUrl}
 Castleknock, Dublin – Science Summer Camp for kids
@@ -259,7 +272,7 @@ Junior Astronauts Science camp Galway
 Date Jul 13 2026 - Jul 13 2026`).camps;
 assert.equal(astronautsCamps.length, 0);
 
-for (const camp of [eventCamps[0], rosemontCamp, claregalwayCamp, glenagearyCamp, brayCamp, leopardstownCamp, greystonesCamp, tuamCamp, naasCamp, castleknockCamp, maynoothCamp, celbridgeCamp, knocklyonCamp]) {
+for (const camp of [eventCamps[0], rosemontCamp, claregalwayCamp, glenagearyCamp, brayCamp, leopardstownCamp, greystonesCamp, tuamCamp, naasCamp, naasJulyCamp, castleknockCamp, maynoothCamp, celbridgeCamp, knocklyonCamp]) {
   assert.equal(/^[A-Z]\d{2}\s?[A-Z0-9]{4}$/i.test(String(camp.town)), false);
   assert.equal(/^[A-Z]\d{2}\s?[A-Z0-9]{4}$/i.test(String(camp.address)), false);
   assert.notEqual(camp.age_min, 0);
