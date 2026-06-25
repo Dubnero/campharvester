@@ -151,7 +151,7 @@ function buildBrayKampKahunaDebugCandidates(rawText: string, input: DiscoveryInp
 }
 
 function isJuniorEinsteinsSource(input: DiscoveryInput, rawText: string, providerName = "") {
-  return /junioreinsteinsscienceclub\.com|Junior Einsteins Science Club|Science Camps List/i.test(`${input.sourceUrl} ${rawText} ${providerName}`);
+  return /junioreinsteinsscienceclub\.com|Junior Einstein'?s?\s+Science Club|Science Camps List/i.test(`${input.sourceUrl} ${rawText} ${providerName}`);
 }
 function parseJuniorEinsteinsVisibleDate(value: string): BricksDateRange | null {
   const range = value.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})\s+(20\d{2})\s*(?:-|–|to)\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})\s+(20\d{2})\b/i);
@@ -266,6 +266,7 @@ function deriveJuniorEinsteinsLocationFromAddress(address: string) {
   const county = parts.find((part) => counties.some((known) => known.toLowerCase() === part.toLowerCase())) || (parts.some((part) => /\bDublin\b/i.test(part)) ? "Dublin" : "");
   const localityCandidates = parts.filter((part) => !counties.some((known) => known.toLowerCase() === part.toLowerCase()) && !isJuniorEinsteinsDublinDistrict(part));
   const town = localityCandidates.at(-1) || parts.find((part) => !/^(?:Co\.?|County)\s+/i.test(part)) || "";
+  if (/\bGreystones\b/i.test(address) && /\b(?:Co\.?\s*)?Wicklow\b|\bCounty\s+Wicklow\b/i.test(address)) return { town: "Greystones", county: "Wicklow", address };
   return { town, county, address };
 }
 
@@ -323,6 +324,7 @@ function juniorEinsteinsLocationContaminated(value: string) {
 function sanitizeJuniorEinsteinsLocation(location: { town: string; county: string; address: string; eircode?: string }, sourceUrl: string) {
   const eircode = location.eircode || juniorEinsteinsEircode(`${location.town} ${location.address}`);
   const cleaned = { town: cleanJuniorEinsteinsAddress(location.town.replace(eircodeRegex, "")), county: cleanJuniorEinsteinsAddress(location.county), address: cleanJuniorEinsteinsAddress(location.address.replace(eircodeRegex, "")), eircode };
+  if (/\bgreystones[-\s]+wicklow\b/i.test(sourceUrl) || /\bGreystones\b/i.test(cleaned.address) && /\b(?:Co\.?\s*)?Wicklow\b|\bCounty\s+Wicklow\b/i.test(cleaned.address)) return { ...cleaned, town: "Greystones", county: "Wicklow" };
   const unsafe = isJuniorEinsteinsUnsafeLocationOnly(cleaned.town) || isJuniorEinsteinsUnsafeLocationOnly(cleaned.address);
   if (!unsafe && !juniorEinsteinsLocationContaminated(`${cleaned.town} ${cleaned.address}`)) return cleaned;
   const fallback = parseJuniorEinsteinsEventLocation(sourceUrl, "");
@@ -872,7 +874,7 @@ function firstMatch(text: string, regex: RegExp) { return text.match(regex)?.[0]
 function firstUrl(text: string, regex: RegExp) { return text.match(regex)?.[0] ?? ""; }
 function findKnown(text: string, values: readonly string[]) { const lower = text.toLowerCase(); return values.find((value) => lower.includes(value.toLowerCase())) ?? ""; }
 function titleFromUrl(sourceUrl: string) { try { const url = new URL(sourceUrl); return url.hostname.replace(/^www\./, "").split(".")[0].replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); } catch { return ""; } }
-function inferProviderName(sourceUrl: string, text: string) { return /junioreinsteinsscienceclub\.com|Junior Einsteins Science Club|Science Camps List/i.test(`${sourceUrl} ${text}`) ? "Junior Einsteins Science Club" : /brayadventures\.ie|Bray Adventures|KAMP KAHUNA/i.test(`${sourceUrl} ${text}`) ? "Bray Adventures" : /starcamp\.ie|\bstarcamp\b/i.test(`${sourceUrl} ${text}`) ? "Starcamp" : /bricks\s*4\s*kidz|bricks4kidz|profile\.php|selected_schedule|ie1/i.test(`${sourceUrl} ${text}`) ? "Bricks4Kidz" : titleFromUrl(sourceUrl); }
+function inferProviderName(sourceUrl: string, text: string) { return /junioreinsteinsscienceclub\.com|Junior Einstein'?s?\s+Science Club|Science Camps List/i.test(`${sourceUrl} ${text}`) ? "Junior Einsteins Science Club" : /brayadventures\.ie|Bray Adventures|KAMP KAHUNA/i.test(`${sourceUrl} ${text}`) ? "Bray Adventures" : /starcamp\.ie|\bstarcamp\b/i.test(`${sourceUrl} ${text}`) ? "Starcamp" : /bricks\s*4\s*kidz|bricks4kidz|profile\.php|selected_schedule|ie1/i.test(`${sourceUrl} ${text}`) ? "Bricks4Kidz" : titleFromUrl(sourceUrl); }
 function websiteFromUrl(sourceUrl: string) { try { const url = new URL(sourceUrl); return `${url.protocol}//${url.host}`; } catch { return sourceUrl; } }
 function validEmail(text: string) { return firstMatch(text, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); }
 function validPhone(text: string) { return firstMatch(text, /(?:\+353|0)\s?(?:1|2[1-9]|4[0-9]|5[0-9]|6[0-9]|7[14]|8[356789]|9[0-9])(?:[\s-]?\d){6,8}\b/); }
@@ -908,7 +910,8 @@ function extractCampCandidates(rawText: string, providerName: string) {
 
 export function extractDiscoveryRecords(input: DiscoveryInput, rawText: string, sourceMethod: SourceMethod = "crawler") {
   const text = rawText.replace(/\s+/g, " ").trim();
-  const providerName = input.providerName?.trim() || inferProviderName(input.sourceUrl, rawText);
+  const detectedProviderName = input.providerName?.trim() || inferProviderName(input.sourceUrl, rawText);
+  const providerName = /junioreinsteinsscienceclub\.com|Junior Einstein'?s?\s+Science Club|Science Camps List/i.test(`${input.sourceUrl} ${rawText} ${detectedProviderName}`) ? "Junior Einsteins Science Club" : detectedProviderName;
   const providerId = input.providerId?.trim() || (providerName ? slugify(providerName) : "");
   const isBrayKampKahuna = isBrayKampKahunaSource(input, rawText, providerName);
   const isJuniorEinsteins = isJuniorEinsteinsSource(input, rawText, providerName);

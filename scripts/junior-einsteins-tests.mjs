@@ -18,6 +18,9 @@ const fallbackCamps = extractDiscoveryRecords(input, fallbackText).camps;
 assert.equal(fallbackCamps.length, 1);
 assert.equal(fallbackCamps[0].start_date, '2026-06-29');
 assert.equal(fallbackCamps[0].end_date, '2026-07-03');
+const canonicalProviderRecords = extractDiscoveryRecords({ ...input, providerName: 'Junior Einstein Science Club' }, fallbackText);
+assert.equal(canonicalProviderRecords.providers[0].provider_name, 'Junior Einsteins Science Club');
+assert.equal(canonicalProviderRecords.providers.some((provider) => provider.provider_name === 'Junior Einstein Science Club'), false);
 
 const eventUrl = 'https://junioreinsteinsscienceclub.com/events/malahide-castle-gardens-dublin-science-summer-camp-for-kids-monday-29th-june-to-friday-3rd-july-930am-130pm-daily/';
 const eventText = `Source URL: ${input.sourceUrl}
@@ -177,10 +180,13 @@ assertCleanLocation(nordAngliaPunctuationCamp);
 const greystonesUrl = 'https://junioreinsteinsscienceclub.com/events/summer-science-camp-for-kids-greystones-wicklow-monday-13th-to-friday-17th-july-9am-1pm-daily/';
 const greystonesCamp = extractDiscoveryRecords({ sourceUrl: greystonesUrl }, `Source URL: ${greystonesUrl}
 Summer Science Camp for kids – Greystones, Wicklow
+Address: St Patricks National School, Church Road, Rathdown Lower, Church Road, Greystones, Co. Wicklow
 Date Jul 13 2026 - Jul 17 2026
 Cost €198`).camps[0];
 assert.equal(greystonesCamp.town, 'Greystones');
 assert.equal(greystonesCamp.county, 'Wicklow');
+assert.notEqual(greystonesCamp.county, 'Dublin');
+assert.equal([greystonesCamp.town, greystonesCamp.county].filter(Boolean).join(', '), 'Greystones, Wicklow');
 assert.notEqual(greystonesCamp.address, '');
 assert.equal(greystonesCamp.age_min, 5);
 assert.equal(greystonesCamp.age_max, 12);
