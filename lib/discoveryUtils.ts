@@ -149,19 +149,34 @@ function aliveOutsidePackageKeyFromUrl(value: string): AliveOutsideVenue["key"] 
   if (/summer-camp-killruddery/i.test(value)) return "bray";
   return "";
 }
-type AliveOutsidePackageDetails = { price: string; ageMin: number; ageMax: number; duration: string; bookingUrl: string; address: string; eircode: string; warnings: string[] };
+type AliveOutsidePackageDetails = { price: string; fourDayPrice: string; ageMin: number; ageMax: number; duration: string; bookingUrl: string; address: string; eircode: string; warnings: string[] };
+
+function aliveOutsidePriceDetails(rawText: string) {
+  const candidates = Array.from(rawText.matchAll(/€\s*(\d{2,3})(?:\.\d{2})?/g)).map((match) => {
+    const value = Number(match[1]);
+    const start = Math.max(0, (match.index ?? 0) - 80);
+    const end = Math.min(rawText.length, (match.index ?? 0) + match[0].length + 80);
+    return { price: `€${match[1]}`, value, context: rawText.slice(start, end) };
+  }).filter((candidate) => candidate.value !== 30);
+  const fourDayDirect = rawText.match(/(?:4\s*(?:day|days)|four\s*day)[^€]{0,80}€\s*(?!30\b)(\d{2,3})(?:\.\d{2})?/i)?.[1];
+  const fiveDayDirect = rawText.match(/(?:5\s*(?:day|days)|five\s*day)[^€]{0,80}€\s*(?!30\b)(\d{2,3})(?:\.\d{2})?/i)?.[1];
+  const fiveDay = candidates.find((candidate) => /5\s*(?:day|days)|five\s*day/i.test(candidate.context));
+  const labelled = candidates.find((candidate) => /full\s+price|total|from|price/i.test(candidate.context));
+  return { price: fiveDayDirect ? `€${fiveDayDirect}` : (fiveDay || labelled || candidates[0])?.price || "", fourDayPrice: fourDayDirect ? `€${fourDayDirect}` : "" };
+}
 function aliveOutsidePackageDetailMap(rawText: string) {
   const details = new Map<AliveOutsideVenue["key"], AliveOutsidePackageDetails>();
   const blocks = aliveOutsideSourceBlocks(rawText);
   for (const venue of aliveOutsideVenues) {
     const packageText = blocks.filter((block) => aliveOutsidePackageKeyFromUrl(`${block.url} ${block.text}`) === venue.key).map((block) => `${block.url}\n${block.text}`).join("\n") || rawText;
-    const price = aliveOutsidePrice(packageText);
+    const priceDetails = aliveOutsidePriceDetails(packageText);
+    const price = priceDetails.price || aliveOutsidePrice(packageText);
     const ageRange = parseAgeRange(packageText);
     const rezgoUrl = firstUrl(packageText, /https?:\/\/[^\s"'<)]*rezgo[^\s"'<)]*/i).replace(/[),.;]+$/, "");
     const duration = firstMatch(packageText, /\b\d+(?:\.\d+)?\s*(?:hours?|hrs?)\s*(?:per\s+day|daily)?\b/i);
     const address = /Killruddery/i.test(packageText) && venue.key === "bray" ? "Killruddery Estate, Southern Cross Road, Bray, Co. Wicklow" : /Coláiste Choilm|Colaiste Choilm/i.test(packageText) && venue.key === "swords" ? "Coláiste Choilm, Swords, Co. Dublin" : /TUD Grangegorman/i.test(packageText) && venue.key === "grangegorman" ? "TUD Grangegorman, Dublin 7" : /The High School|Rathgar/i.test(packageText) && venue.key === "rathgar" ? "The High School, Rathgar, Dublin 6" : venue.address;
-    const eircode = validEircode(packageText) || venue.eircode;
-    details.set(venue.key, { price, ageMin: ageRange.ageMin || 7, ageMax: ageRange.ageMax || 13, duration, bookingUrl: rezgoUrl || venue.bookingUrl, address, eircode, warnings: [price ? "" : "Full price requires review", duration ? "" : "Duration requires review"].filter(Boolean) });
+    const eircode = venue.key === "bray" ? (validEircode(packageText) || venue.eircode) : "";
+    details.set(venue.key, { price, fourDayPrice: priceDetails.fourDayPrice, ageMin: ageRange.ageMin || 7, ageMax: ageRange.ageMax || 13, duration, bookingUrl: rezgoUrl || venue.bookingUrl, address, eircode, warnings: [price ? "" : "Full price requires review", duration ? "" : "Duration requires review"].filter(Boolean) });
   }
   return details;
 }
@@ -169,7 +184,7 @@ function buildAliveOutsideCamps(rawText: string, input: DiscoveryInput, sourceMe
   const detailMap = aliveOutsidePackageDetailMap(rawText);
   return aliveOutsideVenues.flatMap((venue) => venue.ranges.map((range) => {
     const detail = detailMap.get(venue.key);
-    const price = detail?.price || "";
+    const price = venue.key === "bray" && range.startDate === "2026-08-04" && detail?.fourDayPrice ? detail.fourDayPrice : detail?.price || "";
     const warnings = ["Times require review", ...(detail?.warnings ?? ["Full price requires review", "Duration requires review"])].filter(Boolean);
     const fieldConfidence = { camp_name: 100, county: 100, town: 100, address: 100, eircode: detail?.eircode ? 95 : 0, activity_type: 100, holiday_type: 100, age: detail?.ageMin && detail?.ageMax ? 100 : 80, start_date: 100, price: price ? 90 : 0, booking_url: 100 };
     const campIdLocation = venue.key === "bray" ? "bray-killruddery" : venue.key;

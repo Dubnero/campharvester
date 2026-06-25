@@ -56,7 +56,8 @@ Summer Camp The High School Rathgar
 Location: The High School, Rathgar, Dublin 6
 Ages 7-13
 Duration 6 hours per day
-Full price €225
+Full price €182
+Footer Killruddery Estate A98 W9F2
 Rezgo package https://aliveoutside.rezgo.com/details/111111/summer-camp-thehighschool
 
 Source URL: ${swordsUrl}
@@ -64,7 +65,8 @@ Summer Camp Swords
 Venue Coláiste Choilm, Swords, Co. Dublin
 Ages 7 to 13
 Duration 6 hours daily
-Price €210
+Price €150
+Footer Killruddery Estate A98 W9F2
 €30 deposit required
 
 Source URL: ${grangegormanUrl}
@@ -72,14 +74,17 @@ Summer Camp TUD Grangegorman
 Location TUD Grangegorman, Dublin 7
 Age 7-13
 Duration 5.5 hours per day
-Total €215
+Total €150
+Footer Killruddery Estate A98 W9F2
 
 Source URL: ${brayUrl}
 Summer Camp Killruddery
 Venue Killruddery Estate, Southern Cross Road, Bray, Co. Wicklow A98 W9F2
 Ages 7-13
 Duration 6 hours per day
-From €230
+5 day camp €177
+4 day camp €152
+€30 deposit
 `;
 
 const records = extractDiscoveryRecords({ sourceUrl }, crawledText);
@@ -111,25 +116,34 @@ for (const camp of camps) {
   assert.equal(camp.age_max, 13);
   assert.notEqual(camp.price, '€30');
   assert.equal(camp.half_day_or_full_day, 'Full day');
+  assert.equal(camp.start_time, '');
+  assert.equal(camp.end_time, '');
   assert.ok(camp.extractionWarnings.includes('Times require review'));
   assert.equal(camp.booking_url.includes('/book-now'), false);
 }
 
 for (const camp of byTown('Rathgar')) {
-  assert.equal(camp.price, '€225');
+  assert.equal(camp.price, '€182');
+  assert.equal(camp.eircode, '');
+  assert.equal(camp.extractionWarnings.includes('Full price requires review'), false);
   assert.equal(camp.booking_url, 'https://aliveoutside.rezgo.com/details/111111/summer-camp-thehighschool');
   assert.equal(camp.address, 'The High School, Rathgar, Dublin 6');
 }
-assert.equal(byTown('Swords')[0].price, '€210');
+assert.equal(byTown('Swords')[0].price, '€150');
+assert.equal(byTown('Swords')[0].eircode, '');
+assert.equal(byTown('Swords')[0].extractionWarnings.includes('Full price requires review'), false);
 assert.equal(byTown('Swords')[0].booking_url, swordsUrl);
 assert.equal(byTown('Swords')[0].address, 'Coláiste Choilm, Swords, Co. Dublin');
-assert.equal(byTown('Grangegorman')[0].price, '€215');
+assert.equal(byTown('Grangegorman')[0].price, '€150');
+assert.equal(byTown('Grangegorman')[0].eircode, '');
+assert.equal(byTown('Grangegorman')[0].extractionWarnings.includes('Full price requires review'), false);
 assert.equal(byTown('Grangegorman')[0].booking_url, grangegormanUrl);
 assert.equal(byTown('Grangegorman')[0].address, 'TUD Grangegorman, Dublin 7');
 for (const camp of byTown('Bray')) {
-  assert.equal(camp.price, '€230');
+  assert.equal(camp.price, camp.start_date === '2026-08-04' ? '€152' : '€177');
   assert.equal(camp.booking_url, brayUrl);
   assert.equal(camp.eircode, 'A98 W9F2');
+  assert.equal(camp.extractionWarnings.includes('Full price requires review'), false);
 }
 
 const names = camps.map((camp) => camp.camp_name).join('\n');
