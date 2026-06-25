@@ -14,6 +14,7 @@ Alive Outside Summer Camps 2026
 Summer Camps Dublin & Wicklow 2026
 Ages 7 to 13
 Summer Camp Prices 2026 €30 deposit
+Rathgar teaser price €182
 Summer Camp Locations in Dublin & Wicklow 2026
 The High School, Rathgar, Dublin 6
 6th July to 10th July 2026
@@ -152,17 +153,20 @@ for (const camp of byTown('Rathgar')) {
   assert.equal(camp.address, 'The High School, Rathgar, Dublin 6');
 }
 assert.equal(byTown('Swords')[0].price, '€150');
+assert.notEqual(byTown('Swords')[0].price, '€182');
 assert.equal(byTown('Swords')[0].eircode, '');
 assert.equal(byTown('Swords')[0].extractionWarnings.includes('Full price requires review'), false);
 assert.equal(byTown('Swords')[0].booking_url, swordsUrl);
 assert.equal(byTown('Swords')[0].address, 'Coláiste Choilm, Swords, Co. Dublin');
 assert.equal(byTown('Grangegorman')[0].price, '€150');
+assert.notEqual(byTown('Grangegorman')[0].price, '€182');
 assert.equal(byTown('Grangegorman')[0].eircode, '');
 assert.equal(byTown('Grangegorman')[0].extractionWarnings.includes('Full price requires review'), false);
 assert.equal(byTown('Grangegorman')[0].booking_url, grangegormanUrl);
 assert.equal(byTown('Grangegorman')[0].address, 'TUD Grangegorman, Dublin 7');
 for (const camp of byTown('Bray')) {
   assert.equal(camp.price, camp.start_date === '2026-08-04' ? '€152' : '€177');
+  assert.notEqual(camp.price, '€182');
   assert.equal(camp.booking_url, brayUrl);
   assert.equal(camp.eircode, 'A98 W9F2');
   assert.equal(camp.extractionWarnings.includes('Full price requires review'), false);

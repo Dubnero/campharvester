@@ -182,7 +182,9 @@ function aliveOutsidePackageDetailMap(rawText: string) {
   const details = new Map<AliveOutsideVenue["key"], AliveOutsidePackageDetails>();
   const blocks = aliveOutsideSourceBlocks(rawText);
   for (const venue of aliveOutsideVenues) {
-    const packageText = blocks.filter((block) => aliveOutsidePackageKeyFromUrl(`${block.url} ${block.text}`) === venue.key).map((block) => `${block.url}\n${block.text}`).join("\n") || rawText;
+    const urlMatchedBlocks = blocks.filter((block) => block.url && aliveOutsidePackageKeyFromUrl(block.url) === venue.key);
+    const textMatchedBlocks = blocks.filter((block) => !block.url && aliveOutsidePackageKeyFromUrl(block.text) === venue.key);
+    const packageText = (urlMatchedBlocks.length ? urlMatchedBlocks : textMatchedBlocks).map((block) => `${block.url}\n${block.text}`).join("\n") || rawText;
     const priceDetails = aliveOutsidePriceDetails(packageText);
     const price = priceDetails.price || aliveOutsidePrice(packageText);
     const ageRange = parseAgeRange(packageText);
