@@ -56,6 +56,11 @@ Summer Camp The High School Rathgar
 Location: The High School, Rathgar, Dublin 6
 Ages 7-13
 Duration 6 hours per day
+09:00 to 15:00
+09:20 to 15:20
+09:40 to 15:40
+10:00 to 16:00
+10:20 to 16:20
 Full price €182
 Footer Killruddery Estate A98 W9F2
 Rezgo package https://aliveoutside.rezgo.com/details/111111/summer-camp-thehighschool
@@ -65,6 +70,11 @@ Summer Camp Swords
 Venue Coláiste Choilm, Swords, Co. Dublin
 Ages 7 to 13
 Duration 6 hours daily
+09:00 to 15:00
+09:20 to 15:20
+09:40 to 15:40
+10:00 to 16:00
+10:20 to 16:20
 Price €150
 Footer Killruddery Estate A98 W9F2
 €30 deposit required
@@ -74,6 +84,11 @@ Summer Camp TUD Grangegorman
 Location TUD Grangegorman, Dublin 7
 Age 7-13
 Duration 5.5 hours per day
+09:00 to 15:00
+09:20 to 15:20
+09:40 to 15:40
+10:00 to 16:00
+10:20 to 16:20
 Total €150
 Footer Killruddery Estate A98 W9F2
 
@@ -82,6 +97,11 @@ Summer Camp Killruddery
 Venue Killruddery Estate, Southern Cross Road, Bray, Co. Wicklow A98 W9F2
 Ages 7-13
 Duration 6 hours per day
+09:00 to 15:00
+09:20 to 15:20
+09:40 to 15:40
+10:00 to 16:00
+10:20 to 16:20
 5 day camp €177
 4 day camp €152
 €30 deposit
@@ -116,9 +136,11 @@ for (const camp of camps) {
   assert.equal(camp.age_max, 13);
   assert.notEqual(camp.price, '€30');
   assert.equal(camp.half_day_or_full_day, 'Full day');
-  assert.equal(camp.start_time, '');
-  assert.equal(camp.end_time, '');
-  assert.ok(camp.extractionWarnings.includes('Times require review'));
+  assert.equal(camp.start_time, '09:00');
+  assert.equal(camp.end_time, '15:00');
+  assert.notEqual(`${camp.start_time}-${camp.end_time}`, '09:00-16:20');
+  assert.equal(camp.extractionWarnings.includes('Times require review'), false);
+  assert.ok(camp.extractionWarnings.includes('Multiple start times available on booking page'));
   assert.equal(camp.booking_url.includes('/book-now'), false);
 }
 

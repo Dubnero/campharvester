@@ -149,7 +149,7 @@ function aliveOutsidePackageKeyFromUrl(value: string): AliveOutsideVenue["key"] 
   if (/summer-camp-killruddery/i.test(value)) return "bray";
   return "";
 }
-type AliveOutsidePackageDetails = { price: string; fourDayPrice: string; ageMin: number; ageMax: number; duration: string; bookingUrl: string; address: string; eircode: string; warnings: string[] };
+type AliveOutsidePackageDetails = { price: string; fourDayPrice: string; ageMin: number; ageMax: number; duration: string; startTime: string; endTime: string; multipleTimeOptions: boolean; bookingUrl: string; address: string; eircode: string; warnings: string[] };
 
 function aliveOutsidePriceDetails(rawText: string) {
   const candidates = Array.from(rawText.matchAll(/€\s*(\d{2,3})(?:\.\d{2})?/g)).map((match) => {
@@ -164,6 +164,20 @@ function aliveOutsidePriceDetails(rawText: string) {
   const labelled = candidates.find((candidate) => /full\s+price|total|from|price/i.test(candidate.context));
   return { price: fiveDayDirect ? `€${fiveDayDirect}` : (fiveDay || labelled || candidates[0])?.price || "", fourDayPrice: fourDayDirect ? `€${fourDayDirect}` : "" };
 }
+
+function aliveOutsideTimeOptions(rawText: string) {
+  const ranges = Array.from(rawText.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/gi))
+    .map((match) => {
+      const endMarker = match[6];
+      const startMarker = match[3] || (endMarker && Number(match[1]) <= Number(match[4]) ? endMarker : undefined);
+      const startTime = to24Hour(match[1], match[2], startMarker);
+      const endTime = to24Hour(match[4], match[5], endMarker);
+      return { label: match[0], startTime, endTime, hasExplicitTime: Boolean(match[2] || match[3] || match[5] || match[6]) };
+    })
+    .filter((range) => range.hasExplicitTime && range.startTime && range.endTime && range.startTime < range.endTime);
+  const unique = Array.from(new Map(ranges.map((range) => [`${range.startTime}-${range.endTime}`, range])).values()).sort((a, b) => a.startTime.localeCompare(b.startTime));
+  return { startTime: unique[0]?.startTime || "", endTime: unique[0]?.endTime || "", multipleTimeOptions: unique.length > 1, labels: unique.map((range) => range.label) };
+}
 function aliveOutsidePackageDetailMap(rawText: string) {
   const details = new Map<AliveOutsideVenue["key"], AliveOutsidePackageDetails>();
   const blocks = aliveOutsideSourceBlocks(rawText);
@@ -174,9 +188,10 @@ function aliveOutsidePackageDetailMap(rawText: string) {
     const ageRange = parseAgeRange(packageText);
     const rezgoUrl = firstUrl(packageText, /https?:\/\/[^\s"'<)]*rezgo[^\s"'<)]*/i).replace(/[),.;]+$/, "");
     const duration = firstMatch(packageText, /\b\d+(?:\.\d+)?\s*(?:hours?|hrs?)\s*(?:per\s+day|daily)?\b/i);
+    const timeOptions = aliveOutsideTimeOptions(packageText);
     const address = /Killruddery/i.test(packageText) && venue.key === "bray" ? "Killruddery Estate, Southern Cross Road, Bray, Co. Wicklow" : /Coláiste Choilm|Colaiste Choilm/i.test(packageText) && venue.key === "swords" ? "Coláiste Choilm, Swords, Co. Dublin" : /TUD Grangegorman/i.test(packageText) && venue.key === "grangegorman" ? "TUD Grangegorman, Dublin 7" : /The High School|Rathgar/i.test(packageText) && venue.key === "rathgar" ? "The High School, Rathgar, Dublin 6" : venue.address;
     const eircode = venue.key === "bray" ? (validEircode(packageText) || venue.eircode) : "";
-    details.set(venue.key, { price, fourDayPrice: priceDetails.fourDayPrice, ageMin: ageRange.ageMin || 7, ageMax: ageRange.ageMax || 13, duration, bookingUrl: rezgoUrl || venue.bookingUrl, address, eircode, warnings: [price ? "" : "Full price requires review", duration ? "" : "Duration requires review"].filter(Boolean) });
+    details.set(venue.key, { price, fourDayPrice: priceDetails.fourDayPrice, ageMin: ageRange.ageMin || 7, ageMax: ageRange.ageMax || 13, duration, startTime: timeOptions.startTime, endTime: timeOptions.endTime, multipleTimeOptions: timeOptions.multipleTimeOptions, bookingUrl: rezgoUrl || venue.bookingUrl, address, eircode, warnings: [price ? "" : "Full price requires review", duration ? "" : "Duration requires review", timeOptions.startTime && timeOptions.endTime ? "" : "Times require review", timeOptions.multipleTimeOptions ? "Multiple start times available on booking page" : ""].filter(Boolean) });
   }
   return details;
 }
@@ -185,10 +200,10 @@ function buildAliveOutsideCamps(rawText: string, input: DiscoveryInput, sourceMe
   return aliveOutsideVenues.flatMap((venue) => venue.ranges.map((range) => {
     const detail = detailMap.get(venue.key);
     const price = venue.key === "bray" && range.startDate === "2026-08-04" && detail?.fourDayPrice ? detail.fourDayPrice : detail?.price || "";
-    const warnings = ["Times require review", ...(detail?.warnings ?? ["Full price requires review", "Duration requires review"])].filter(Boolean);
+    const warnings = (detail?.warnings ?? ["Full price requires review", "Duration requires review", "Times require review"]).filter(Boolean);
     const fieldConfidence = { camp_name: 100, county: 100, town: 100, address: 100, eircode: detail?.eircode ? 95 : 0, activity_type: 100, holiday_type: 100, age: detail?.ageMin && detail?.ageMax ? 100 : 80, start_date: 100, price: price ? 90 : 0, booking_url: 100 };
     const campIdLocation = venue.key === "bray" ? "bray-killruddery" : venue.key;
-    return { camp_id: `alive-outside-${campIdLocation}-${range.startDate}`, provider_id: providerId, camp_name: venue.campName, county: venue.county, town: venue.town, address: detail?.address || venue.address, eircode: detail?.eircode || venue.eircode, activity_type: "Outdoor Adventure", holiday_type: "Summer" as HolidayType, age_min: detail?.ageMin || 7, age_max: detail?.ageMax || 13, start_date: range.startDate, end_date: range.endDate, start_time: "", end_time: "", half_day_or_full_day: "Full day" as const, price, booking_url: detail?.bookingUrl || venue.bookingUrl, status: "draft" as const, verified: false, featured: false, source_url: input.sourceUrl, last_checked: today(), selected: true, needs_review: warnings.length > 0, duplicateWarnings: [], confidence: price ? 96 : 93, fieldConfidence, extractionWarnings: warnings, source_method: sourceMethod } satisfies DiscoveryCamp;
+    return { camp_id: `alive-outside-${campIdLocation}-${range.startDate}`, provider_id: providerId, camp_name: venue.campName, county: venue.county, town: venue.town, address: detail?.address || venue.address, eircode: detail?.eircode || venue.eircode, activity_type: "Outdoor Adventure", holiday_type: "Summer" as HolidayType, age_min: detail?.ageMin || 7, age_max: detail?.ageMax || 13, start_date: range.startDate, end_date: range.endDate, start_time: detail?.startTime || "", end_time: detail?.endTime || "", half_day_or_full_day: "Full day" as const, price, booking_url: detail?.bookingUrl || venue.bookingUrl, status: "draft" as const, verified: false, featured: false, source_url: input.sourceUrl, last_checked: today(), selected: true, needs_review: warnings.length > 0, duplicateWarnings: [], confidence: price ? 96 : 93, fieldConfidence, extractionWarnings: warnings, source_method: sourceMethod } satisfies DiscoveryCamp;
   }));
 }
 function buildAliveOutsideDebugCandidates(rawText: string, input: DiscoveryInput, sourceMethod: SourceMethod, providerId: string) {
