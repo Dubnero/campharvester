@@ -115,6 +115,7 @@ assert.equal(records.providers[0].provider_id, 'P0003');
 assert.equal(records.providers[0].activity_category, 'Outdoor Adventure');
 assert.equal(records.providers[0].provider_type, 'Private');
 assert.equal(camps.length, 15);
+assert.ok(new Set(camps.map((camp) => camp.price)).size > 1);
 
 const byTown = (town) => camps.filter((camp) => camp.town === town);
 assert.deepEqual(byTown('Rathgar').map((camp) => `${camp.start_date}:${camp.end_date}`), [
@@ -180,7 +181,9 @@ for (const junk of ['Summer Camp Prices 2026', 'HELL & BACK Assault Course', 'Bi
 const debug = buildExtractionDebug({ sourceUrl }, crawledText);
 assert.ok(debug.stages.some((stage) => stage.label === 'Alive Outside provider-specific extractor detected' && stage.passed));
 assert.ok(debug.stages.some((stage) => stage.label === 'Alive Outside camp records created' && stage.count === 15));
-assert.ok(debug.candidateRows.every((row) => String(row.parsedFields.package_details_merged).includes('rathgar')));
+assert.ok(debug.candidateRows.every((row) => String(row.parsedFields.package_details_merged).includes('summer-camp-thehighschool')));
+assert.ok(debug.candidateRows.every((row) => String(row.parsedFields.package_price_mapping).includes('summer-camp-killruddery -> price_5_day €177, price_4_day €152')));
+assert.ok(debug.candidateRows.every((row) => row.parsedFields.package_key && row.parsedFields.assigned_price));
 
 const originalFetch = globalThis.fetch;
 const packagePages = new Set([rathgarUrl, swordsUrl, grangegormanUrl, brayUrl]);
