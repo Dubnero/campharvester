@@ -8,7 +8,13 @@ export const holidayTypes = [
   "Other",
 ] as const;
 
-export const campStatuses = ["draft", "approved", "needs_review"] as const;
+export const campStatuses = [
+  "draft",
+  "approved",
+  "hidden",
+  "archived",
+  "needs_review",
+] as const;
 
 export const dayLengths = ["Half day", "Full day", "Both", "Unknown"] as const;
 
