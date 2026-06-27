@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   campFields,
   campsToCsv,
@@ -14,11 +21,28 @@ import {
   requiredCampFields,
   validateCamp,
 } from "@/lib/campUtils";
+import {
+  bulkUpdateCampStatus,
+  getAdminStatusOptions,
+  selectAllVisibleCampIds,
+  toggleCampSelection,
+} from "@/lib/adminCampUtils";
 import { clearStoredCamps, loadStoredCamps } from "@/lib/campStorage";
-import { getCamps, getProviders } from "@/lib/dataRepository";
+import {
+  getCamps,
+  getProviders,
+  updateCamp as saveCampToRepository,
+  updateCampStatuses,
+} from "@/lib/dataRepository";
 import { migrateLocalStorageToSupabaseIfEmpty } from "@/lib/localStorageMigration";
 import { loadStoredProviders } from "@/lib/providerStorage";
-import { Camp, Provider, campStatuses, dayLengths, holidayTypes } from "@/lib/types";
+import {
+  Camp,
+  CampStatus,
+  Provider,
+  dayLengths,
+  holidayTypes,
+} from "@/lib/types";
 
 type Filters = {
   search: string;
@@ -33,15 +57,26 @@ type Props = {
   initialProviders: Provider[];
 };
 
-const selectFields = new Set<keyof Camp>(["provider_id", "holiday_type", "half_day_or_full_day", "status"]);
+const selectFields = new Set<keyof Camp>([
+  "provider_id",
+  "holiday_type",
+  "half_day_or_full_day",
+  "status",
+]);
 const numberFields = new Set<keyof Camp>(["age_min", "age_max"]);
-const dateFields = new Set<keyof Camp>(["start_date", "end_date", "last_checked"]);
+const dateFields = new Set<keyof Camp>([
+  "start_date",
+  "end_date",
+  "last_checked",
+]);
 const timeFields = new Set<keyof Camp>(["start_time", "end_time"]);
 const booleanFields = new Set<keyof Camp>(["verified", "featured"]);
 const longTextFields = new Set<keyof Camp>(["address"]);
 
 function formatLabel(field: string) {
-  return field.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
+  return field
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function badgeClass(status: Camp["status"]) {
@@ -53,9 +88,13 @@ function badgeClass(status: Camp["status"]) {
 export function CampAdmin({ initialCamps, initialProviders }: Props) {
   const [camps, setCamps] = useState<Camp[]>(initialCamps);
   const [providers, setProviders] = useState<Provider[]>(initialProviders);
-  const [dataSourceMessage, setDataSourceMessage] = useState("Loading Supabase data…");
+  const [dataSourceMessage, setDataSourceMessage] = useState(
+    "Loading Supabase data…",
+  );
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedCampId, setSelectedCampId] = useState(initialCamps[0]?.camp_id ?? "");
+  const [selectedCampId, setSelectedCampId] = useState(
+    initialCamps[0]?.camp_id ?? "",
+  );
   const [filters, setFilters] = useState<Filters>({
     search: "",
     county: "",
@@ -65,6 +104,10 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
   });
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [formErrors, setFormErrors] = useState<string[]>([]);
+  const [selectedCampIds, setSelectedCampIds] = useState<string[]>([]);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -73,12 +116,24 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
     async function loadDashboardData() {
       setIsLoading(true);
       await migrateLocalStorageToSupabaseIfEmpty();
-      const [remoteProviders, remoteCamps] = await Promise.all([getProviders(), getCamps()]);
+      const [remoteProviders, remoteCamps] = await Promise.all([
+        getProviders(),
+        getCamps(),
+      ]);
       if (!active) return;
 
-      if (!remoteProviders.error && !remoteCamps.error && (remoteProviders.data.length > 0 || remoteCamps.data.length > 0)) {
-        setProviders(remoteProviders.data.length > 0 ? remoteProviders.data : initialProviders);
-        const nextCamps = remoteCamps.data.length > 0 ? remoteCamps.data : initialCamps;
+      if (
+        !remoteProviders.error &&
+        !remoteCamps.error &&
+        (remoteProviders.data.length > 0 || remoteCamps.data.length > 0)
+      ) {
+        setProviders(
+          remoteProviders.data.length > 0
+            ? remoteProviders.data
+            : initialProviders,
+        );
+        const nextCamps =
+          remoteCamps.data.length > 0 ? remoteCamps.data : initialCamps;
         setCamps(nextCamps);
         setSelectedCampId(nextCamps[0]?.camp_id ?? "");
         setDataSourceMessage("Showing Supabase data.");
@@ -90,22 +145,45 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
           setCamps(storedCamps);
           setSelectedCampId(storedCamps[0]?.camp_id ?? "");
         }
-        setDataSourceMessage(`Showing local fallback data${remoteProviders.error || remoteCamps.error ? ` (${remoteProviders.error ?? remoteCamps.error})` : ""}.`);
+        setDataSourceMessage(
+          `Showing local fallback data${remoteProviders.error || remoteCamps.error ? ` (${remoteProviders.error ?? remoteCamps.error})` : ""}.`,
+        );
       }
       setIsLoading(false);
     }
 
     loadDashboardData();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [initialCamps, initialProviders]);
 
   const providerLookup = useMemo(() => providersById(providers), [providers]);
-  const stats = useMemo(() => getDashboardStats(camps, providers), [camps, providers]);
-  const filteredCamps = useMemo(() => filterCamps(camps, providers, filters), [camps, providers, filters]);
-  const selectedCamp = camps.find((camp) => camp.camp_id === selectedCampId) ?? camps[0] ?? createBlankCamp(providers[0]?.provider_id ?? "");
+  const stats = useMemo(
+    () => getDashboardStats(camps, providers),
+    [camps, providers],
+  );
+  const filteredCamps = useMemo(
+    () => filterCamps(camps, providers, filters),
+    [camps, providers, filters],
+  );
+  const selectedCamp =
+    camps.find((camp) => camp.camp_id === selectedCampId) ??
+    camps[0] ??
+    createBlankCamp(providers[0]?.provider_id ?? "");
   const selectedProvider = providerLookup[selectedCamp.provider_id];
   const counties = useMemo(() => getUniqueValues(camps, "county"), [camps]);
-  const activityTypes = useMemo(() => getUniqueValues(camps, "activity_type"), [camps]);
+  const activityTypes = useMemo(
+    () => getUniqueValues(camps, "activity_type"),
+    [camps],
+  );
+  const statusOptions = useMemo(() => getAdminStatusOptions(camps), [camps]);
+  const allVisibleSelected =
+    filteredCamps.length > 0 &&
+    filteredCamps.every((camp) => selectedCampIds.includes(camp.camp_id));
+  const someVisibleSelected = filteredCamps.some((camp) =>
+    selectedCampIds.includes(camp.camp_id),
+  );
 
   function updateFilter(key: keyof Filters, value: string) {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -113,19 +191,33 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
 
   function updateCamp(field: keyof Camp, value: string | number | boolean) {
     setCamps((currentCamps) =>
-      currentCamps.map((camp) => (camp.camp_id === selectedCamp.camp_id ? { ...camp, [field]: value } : camp)),
+      currentCamps.map((camp) =>
+        camp.camp_id === selectedCamp.camp_id
+          ? { ...camp, [field]: value }
+          : camp,
+      ),
     );
   }
 
   function handleClearImportedCamps() {
-    const confirmed = window.confirm("Clear imported camps and revert to mock camp data?");
+    const confirmed = window.confirm(
+      "Clear imported camps and revert to mock camp data?",
+    );
     if (!confirmed) return;
 
     clearStoredCamps();
     setCamps(initialCamps);
     setSelectedCampId(initialCamps[0]?.camp_id ?? "");
-    setDataSourceMessage("Showing bundled mock data after clearing local fallback camps.");
-    setFilters({ search: "", county: "", activityType: "", holidayType: "", status: "" });
+    setDataSourceMessage(
+      "Showing bundled mock data after clearing local fallback camps.",
+    );
+    setFilters({
+      search: "",
+      county: "",
+      activityType: "",
+      holidayType: "",
+      status: "",
+    });
     setImportErrors([]);
     setFormErrors([]);
   }
@@ -172,6 +264,42 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
     URL.revokeObjectURL(url);
   }
 
+  async function handleSaveSelected() {
+    setIsSaving(true);
+    setActionMessage(null);
+    setActionError(null);
+    const result = await saveCampToRepository(selectedCamp);
+    setIsSaving(false);
+    if (result.error) {
+      setActionError(
+        `Could not save ${selectedCamp.camp_name || "camp"}: ${result.error}`,
+      );
+      return;
+    }
+    setActionMessage(`Saved ${selectedCamp.camp_name || "camp"}.`);
+  }
+
+  async function handleBulkStatusUpdate(status: CampStatus) {
+    if (selectedCampIds.length === 0) return;
+    setIsSaving(true);
+    setActionMessage(null);
+    setActionError(null);
+    const idsToUpdate = selectedCampIds;
+    const result = await updateCampStatuses(idsToUpdate, status);
+    setIsSaving(false);
+    if (result.error) {
+      setActionError(`Could not update selected camps: ${result.error}`);
+      return;
+    }
+    setCamps((currentCamps) =>
+      bulkUpdateCampStatus(currentCamps, idsToUpdate, status),
+    );
+    setSelectedCampIds([]);
+    setActionMessage(
+      `Updated ${idsToUpdate.length} selected camp${idsToUpdate.length === 1 ? "" : "s"} to ${status}.`,
+    );
+  }
+
   function renderField(field: keyof Camp) {
     const value = selectedCamp[field];
     const isRequired = requiredCampFields.includes(field);
@@ -181,7 +309,11 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
         return (
           <label key={field}>
             Provider <span className="required">*</span>
-            <select value={String(value)} onChange={(event) => updateCamp(field, event.target.value)} required>
+            <select
+              value={String(value)}
+              onChange={(event) => updateCamp(field, event.target.value)}
+              required
+            >
               {providers.map((provider) => (
                 <option key={provider.provider_id} value={provider.provider_id}>
                   {provider.provider_name}
@@ -193,11 +325,20 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
       }
 
       const options =
-        field === "holiday_type" ? holidayTypes : field === "half_day_or_full_day" ? dayLengths : campStatuses;
+        field === "holiday_type"
+          ? holidayTypes
+          : field === "half_day_or_full_day"
+            ? dayLengths
+            : statusOptions;
       return (
         <label key={field}>
-          {formatLabel(field)} {isRequired ? <span className="required">*</span> : null}
-          <select value={String(value)} onChange={(event) => updateCamp(field, event.target.value)} required={isRequired}>
+          {formatLabel(field)}{" "}
+          {isRequired ? <span className="required">*</span> : null}
+          <select
+            value={String(value)}
+            onChange={(event) => updateCamp(field, event.target.value)}
+            required={isRequired}
+          >
             {options.map((option) => (
               <option key={option} value={option}>
                 {option}
@@ -211,8 +352,13 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
     if (longTextFields.has(field)) {
       return (
         <label key={field} className="wide-field">
-          {formatLabel(field)} {isRequired ? <span className="required">*</span> : null}
-          <textarea value={String(value)} onChange={(event) => updateCamp(field, event.target.value)} required={isRequired} />
+          {formatLabel(field)}{" "}
+          {isRequired ? <span className="required">*</span> : null}
+          <textarea
+            value={String(value)}
+            onChange={(event) => updateCamp(field, event.target.value)}
+            required={isRequired}
+          />
         </label>
       );
     }
@@ -244,12 +390,18 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
 
     return (
       <label key={field}>
-        {formatLabel(field)} {isRequired ? <span className="required">*</span> : null}
+        {formatLabel(field)}{" "}
+        {isRequired ? <span className="required">*</span> : null}
         <input
           type={type}
           value={String(value)}
           onChange={(event) =>
-            updateCamp(field, numberFields.has(field) ? Number(event.target.value) : event.target.value)
+            updateCamp(
+              field,
+              numberFields.has(field)
+                ? Number(event.target.value)
+                : event.target.value,
+            )
           }
           required={isRequired}
         />
@@ -264,8 +416,8 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
           <p className="eyebrow">Internal admin · Supabase primary data</p>
           <h1>CampHarvester</h1>
           <p>
-            Collect, review and manage Irish kids&apos; camp listings for Wicklow and Dublin before the public
-            directory launch.
+            Collect, review and manage Irish kids&apos; camp listings for
+            Wicklow and Dublin before the public directory launch.
           </p>
         </div>
         <div className="hero-actions">
@@ -292,37 +444,71 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
 
       <section className="panel data-source-banner" aria-live="polite">
         <p>
-          {isLoading ? "Loading providers and camps from Supabase…" : dataSourceMessage}
+          {isLoading
+            ? "Loading providers and camps from Supabase…"
+            : dataSourceMessage}
         </p>
-        <button type="button" className="secondary" onClick={handleClearImportedCamps}>
+        <button
+          type="button"
+          className="secondary"
+          onClick={handleClearImportedCamps}
+        >
           Clear local fallback camps
         </button>
       </section>
 
       <section className="stats-grid" aria-label="Dashboard metrics">
-        <article><span>Total camps</span><strong>{stats.total}</strong></article>
-        <article><span>Draft camps</span><strong>{stats.draft}</strong></article>
-        <article><span>Approved camps</span><strong>{stats.approved}</strong></article>
-        <article><span>Needs review</span><strong>{stats.needsReview}</strong></article>
-        <article><span>Camps from featured providers</span><strong>{stats.featured}</strong></article>
-        <article><span>Camps from verified providers</span><strong>{stats.verified}</strong></article>
+        <article>
+          <span>Total camps</span>
+          <strong>{stats.total}</strong>
+        </article>
+        <article>
+          <span>Draft camps</span>
+          <strong>{stats.draft}</strong>
+        </article>
+        <article>
+          <span>Approved camps</span>
+          <strong>{stats.approved}</strong>
+        </article>
+        <article>
+          <span>Needs review</span>
+          <strong>{stats.needsReview}</strong>
+        </article>
+        <article>
+          <span>Camps from featured providers</span>
+          <strong>{stats.featured}</strong>
+        </article>
+        <article>
+          <span>Camps from verified providers</span>
+          <strong>{stats.verified}</strong>
+        </article>
       </section>
 
       <section className="panel import-panel">
         <div>
           <h2>CSV import</h2>
           <p>
-            Import camp CSV rows that reference an existing provider_id. Use the Camps Import Wizard to persist accepted imports to the dashboard.
+            Import camp CSV rows that reference an existing provider_id. Use the
+            Camps Import Wizard to persist accepted imports to the dashboard.
           </p>
         </div>
         <label className="file-input">
           <span>Choose CSV file</span>
-          <input ref={fileInputRef} type="file" accept=".csv,text/csv" onChange={handleImport} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleImport}
+          />
         </label>
         {importErrors.length > 0 ? (
           <div className="error-box" role="alert">
             <strong>Import errors</strong>
-            <ul>{importErrors.map((error) => <li key={error}>{error}</li>)}</ul>
+            <ul>
+              {importErrors.map((error) => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
           </div>
         ) : null}
       </section>
@@ -331,7 +517,10 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
         <div className="section-heading">
           <div>
             <h2>Camp listings</h2>
-            <p>{filteredCamps.length} of {camps.length} camps shown · {providers.length} providers available</p>
+            <p>
+              {filteredCamps.length} of {camps.length} camps shown ·{" "}
+              {providers.length} providers available
+            </p>
           </div>
         </div>
         <div className="filters">
@@ -345,37 +534,131 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
           </label>
           <label>
             County
-            <select value={filters.county} onChange={(event) => updateFilter("county", event.target.value)}>
+            <select
+              value={filters.county}
+              onChange={(event) => updateFilter("county", event.target.value)}
+            >
               <option value="">All counties</option>
-              {counties.map((county) => <option key={county}>{county}</option>)}
+              {counties.map((county) => (
+                <option key={county}>{county}</option>
+              ))}
             </select>
           </label>
           <label>
             Activity type
-            <select value={filters.activityType} onChange={(event) => updateFilter("activityType", event.target.value)}>
+            <select
+              value={filters.activityType}
+              onChange={(event) =>
+                updateFilter("activityType", event.target.value)
+              }
+            >
               <option value="">All activities</option>
-              {activityTypes.map((activityType) => <option key={activityType}>{activityType}</option>)}
+              {activityTypes.map((activityType) => (
+                <option key={activityType}>{activityType}</option>
+              ))}
             </select>
           </label>
           <label>
             Holiday type
-            <select value={filters.holidayType} onChange={(event) => updateFilter("holidayType", event.target.value)}>
+            <select
+              value={filters.holidayType}
+              onChange={(event) =>
+                updateFilter("holidayType", event.target.value)
+              }
+            >
               <option value="">All holidays</option>
-              {holidayTypes.map((holidayType) => <option key={holidayType}>{holidayType}</option>)}
+              {holidayTypes.map((holidayType) => (
+                <option key={holidayType}>{holidayType}</option>
+              ))}
             </select>
           </label>
           <label>
             Status
-            <select value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}>
+            <select
+              value={filters.status}
+              onChange={(event) => updateFilter("status", event.target.value)}
+            >
               <option value="">All statuses</option>
-              {campStatuses.map((status) => <option key={status}>{status}</option>)}
+              {statusOptions.map((status) => (
+                <option key={status}>{status}</option>
+              ))}
             </select>
           </label>
+        </div>
+        {actionMessage ? (
+          <div className="success-box admin-feedback" role="status">
+            {actionMessage}
+          </div>
+        ) : null}
+        {actionError ? (
+          <div className="error-box admin-feedback" role="alert">
+            {actionError}
+          </div>
+        ) : null}
+        <div className="bulk-action-bar">
+          <strong>{selectedCampIds.length} selected</strong>
+          <button
+            type="button"
+            className="secondary"
+            disabled={selectedCampIds.length === 0 || isSaving}
+            onClick={() => setSelectedCampIds([])}
+          >
+            Clear selection
+          </button>
+          <button
+            type="button"
+            disabled={selectedCampIds.length === 0 || isSaving}
+            onClick={() => handleBulkStatusUpdate("approved")}
+          >
+            Approve selected
+          </button>
+          <button
+            type="button"
+            disabled={selectedCampIds.length === 0 || isSaving}
+            onClick={() => handleBulkStatusUpdate("draft")}
+          >
+            Move selected to draft
+          </button>
+          <button
+            type="button"
+            disabled={selectedCampIds.length === 0 || isSaving}
+            onClick={() => handleBulkStatusUpdate("hidden")}
+          >
+            Hide selected
+          </button>
+          <button
+            type="button"
+            disabled={selectedCampIds.length === 0 || isSaving}
+            onClick={() => handleBulkStatusUpdate("archived")}
+          >
+            Archive selected
+          </button>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
+                <th className="checkbox-column">
+                  <input
+                    aria-label="Select all visible camps"
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    ref={(input) => {
+                      if (input)
+                        input.indeterminate =
+                          !allVisibleSelected && someVisibleSelected;
+                    }}
+                    onChange={(event) =>
+                      setSelectedCampIds((current) =>
+                        selectAllVisibleCampIds(
+                          current,
+                          filteredCamps,
+                          event.target.checked,
+                        ),
+                      )
+                    }
+                  />
+                </th>
                 <th>Camp</th>
                 <th>Provider</th>
                 <th>Town</th>
@@ -393,26 +676,66 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
                 return (
                   <tr
                     key={camp.camp_id}
-                    className={camp.camp_id === selectedCamp.camp_id ? "selected-row" : ""}
+                    className={
+                      camp.camp_id === selectedCamp.camp_id
+                        ? "selected-row"
+                        : ""
+                    }
                     onClick={() => {
                       setSelectedCampId(camp.camp_id);
                       setFormErrors([]);
                     }}
                   >
-                    <td><strong>{camp.camp_name}</strong><small>{camp.start_date} → {camp.end_date}</small></td>
+                    <td className="checkbox-column">
+                      <input
+                        aria-label={`Select ${camp.camp_name}`}
+                        type="checkbox"
+                        checked={selectedCampIds.includes(camp.camp_id)}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) =>
+                          setSelectedCampIds((current) =>
+                            toggleCampSelection(
+                              current,
+                              camp.camp_id,
+                              event.target.checked,
+                            ),
+                          )
+                        }
+                      />
+                    </td>
                     <td>
-                      <strong>{provider?.provider_name ?? "Unknown provider"}</strong>
-                      <small>{provider?.primary_email ?? camp.provider_id}</small>
+                      <strong>{camp.camp_name}</strong>
+                      <small>
+                        {camp.start_date} → {camp.end_date}
+                      </small>
+                    </td>
+                    <td>
+                      <strong>
+                        {provider?.provider_name ?? "Unknown provider"}
+                      </strong>
+                      <small>
+                        {provider?.primary_email ?? camp.provider_id}
+                      </small>
                     </td>
                     <td>{camp.town}</td>
                     <td>{camp.county}</td>
                     <td>{camp.activity_type}</td>
                     <td>{camp.holiday_type}</td>
-                    <td><span className={badgeClass(camp.status)}>{camp.status}</span></td>
+                    <td>
+                      <span className={badgeClass(camp.status)}>
+                        {camp.status}
+                      </span>
+                    </td>
                     <td className="flags">
-                      {provider?.verified ? <span className="flag verified">Verified</span> : null}
-                      {provider?.featured ? <span className="flag featured">Featured</span> : null}
-                      {!provider?.verified && !provider?.featured ? <span className="empty-state">—</span> : null}
+                      {provider?.verified ? (
+                        <span className="flag verified">Verified</span>
+                      ) : null}
+                      {provider?.featured ? (
+                        <span className="flag featured">Featured</span>
+                      ) : null}
+                      {!provider?.verified && !provider?.featured ? (
+                        <span className="empty-state">—</span>
+                      ) : null}
                     </td>
                   </tr>
                 );
@@ -426,23 +749,49 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
         <div className="section-heading">
           <div>
             <h2>Edit camp</h2>
-            <p>Camp records store provider_id only; provider details below are resolved from the active provider data.</p>
+            <p>
+              Camp records store provider_id only; provider details below are
+              resolved from the active provider data.
+            </p>
           </div>
-          <span className={badgeClass(selectedCamp.status)}>{selectedCamp.status}</span>
+          <span className={badgeClass(selectedCamp.status)}>
+            {selectedCamp.status}
+          </span>
         </div>
         {selectedProvider ? (
-          <aside className="provider-card" aria-label="Selected provider details">
+          <aside
+            className="provider-card"
+            aria-label="Selected provider details"
+          >
             <div>
               <strong>{selectedProvider.provider_name}</strong>
               <p>{selectedProvider.description}</p>
             </div>
             <div className="provider-meta">
               <a href={selectedProvider.website}>{selectedProvider.website}</a>
-              <span>{[selectedProvider.primary_email, selectedProvider.secondary_email].filter(Boolean).join(", ")}</span>
-              <span>{[selectedProvider.primary_phone, selectedProvider.secondary_phone].filter(Boolean).join(", ")}</span>
+              <span>
+                {[
+                  selectedProvider.primary_email,
+                  selectedProvider.secondary_email,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
+              </span>
+              <span>
+                {[
+                  selectedProvider.primary_phone,
+                  selectedProvider.secondary_phone,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
+              </span>
               <span className="flags">
-                {selectedProvider.verified ? <span className="flag verified">Verified provider</span> : null}
-                {selectedProvider.featured ? <span className="flag featured">Featured provider</span> : null}
+                {selectedProvider.verified ? (
+                  <span className="flag verified">Verified provider</span>
+                ) : null}
+                {selectedProvider.featured ? (
+                  <span className="flag featured">Featured provider</span>
+                ) : null}
               </span>
             </div>
           </aside>
@@ -452,12 +801,27 @@ export function CampAdmin({ initialCamps, initialProviders }: Props) {
           {formErrors.length > 0 ? (
             <div className="error-box wide-field" role="alert">
               <strong>Validation issues</strong>
-              <ul>{formErrors.map((error) => <li key={error}>{error}</li>)}</ul>
+              <ul>
+                {formErrors.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
             </div>
           ) : null}
           <div className="form-actions wide-field">
+            <button
+              type="button"
+              onClick={handleSaveSelected}
+              disabled={isSaving}
+            >
+              Save camp
+            </button>
             <button type="submit">Validate camp</button>
-            <button type="button" className="secondary" onClick={() => setFormErrors([])}>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setFormErrors([])}
+            >
               Clear validation
             </button>
           </div>

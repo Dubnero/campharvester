@@ -120,32 +120,89 @@ export async function getProviders(): Promise<RepositoryResult<Provider[]>> {
   const missingConfig = configError();
   if (!supabase || missingConfig) return { data: [], error: missingConfig };
 
-  const { data, error } = await supabase.from("providers").select(providerSelect).order("provider_name", { ascending: true });
-  return { data: (data ?? []) as unknown as Provider[], error: error?.message ?? null };
+  const { data, error } = await supabase
+    .from("providers")
+    .select(providerSelect)
+    .order("provider_name", { ascending: true });
+  return {
+    data: (data ?? []) as unknown as Provider[],
+    error: error?.message ?? null,
+  };
 }
 
-export async function upsertProviders(providers: Provider[]): Promise<RepositoryResult<Provider[]>> {
+export async function upsertProviders(
+  providers: Provider[],
+): Promise<RepositoryResult<Provider[]>> {
   const missingConfig = configError();
   if (!supabase || missingConfig) return { data: [], error: missingConfig };
 
-  const providerRows = providers.map((provider) => toProviderRow(prepareProviderForSupabase(provider)));
-  const { data, error } = await supabase.from("providers").upsert(providerRows, { onConflict: "provider_id" }).select(providerSelect);
-  return { data: (data ?? []) as unknown as Provider[], error: error?.message ?? null };
+  const providerRows = providers.map((provider) =>
+    toProviderRow(prepareProviderForSupabase(provider)),
+  );
+  const { data, error } = await supabase
+    .from("providers")
+    .upsert(providerRows, { onConflict: "provider_id" })
+    .select(providerSelect);
+  return {
+    data: (data ?? []) as unknown as Provider[],
+    error: error?.message ?? null,
+  };
 }
 
 export async function getCamps(): Promise<RepositoryResult<Camp[]>> {
   const missingConfig = configError();
   if (!supabase || missingConfig) return { data: [], error: missingConfig };
 
-  const { data, error } = await supabase.from("camps").select(campSelect).order("start_date", { ascending: true });
-  return { data: (data ?? []) as unknown as Camp[], error: error?.message ?? null };
+  const { data, error } = await supabase
+    .from("camps")
+    .select(campSelect)
+    .order("start_date", { ascending: true });
+  return {
+    data: (data ?? []) as unknown as Camp[],
+    error: error?.message ?? null,
+  };
 }
 
-export async function upsertCamps(camps: Camp[]): Promise<RepositoryResult<Camp[]>> {
+export async function upsertCamps(
+  camps: Camp[],
+): Promise<RepositoryResult<Camp[]>> {
   const missingConfig = configError();
   if (!supabase || missingConfig) return { data: [], error: missingConfig };
 
-  const campRows = camps.map((camp) => toCampRow(prepareCampForSupabase(camp) as Camp));
-  const { data, error } = await supabase.from("camps").upsert(campRows, { onConflict: "camp_id" }).select(campSelect);
-  return { data: (data ?? []) as unknown as Camp[], error: error?.message ?? null };
+  const campRows = camps.map((camp) =>
+    toCampRow(prepareCampForSupabase(camp) as Camp),
+  );
+  const { data, error } = await supabase
+    .from("camps")
+    .upsert(campRows, { onConflict: "camp_id" })
+    .select(campSelect);
+  return {
+    data: (data ?? []) as unknown as Camp[],
+    error: error?.message ?? null,
+  };
+}
+
+export async function updateCamp(
+  camp: Camp,
+): Promise<RepositoryResult<Camp[]>> {
+  return upsertCamps([camp]);
+}
+
+export async function updateCampStatuses(
+  campIds: string[],
+  status: Camp["status"],
+): Promise<RepositoryResult<Camp[]>> {
+  const missingConfig = configError();
+  if (!supabase || missingConfig) return { data: [], error: missingConfig };
+  if (campIds.length === 0) return { data: [], error: null };
+
+  const { data, error } = await supabase
+    .from("camps")
+    .update({ status })
+    .in("camp_id", campIds)
+    .select(campSelect);
+  return {
+    data: (data ?? []) as unknown as Camp[],
+    error: error?.message ?? null,
+  };
 }
