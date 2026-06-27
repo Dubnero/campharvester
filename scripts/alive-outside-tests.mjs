@@ -57,6 +57,9 @@ Summer Camp The High School Rathgar
 Location: The High School, Rathgar, Dublin 6
 Ages 7-13
 Duration 6 hours per day
+For General Enquiries, our office is open from 09:00-17:30 (Mon to Fri)
+START / FINISH TIMES
+Choose from the following start/finish time options
 09:00 to 15:00
 09:20 to 15:20
 09:40 to 15:40
@@ -71,6 +74,8 @@ Summer Camp Swords
 Venue Coláiste Choilm, Swords, Co. Dublin
 Ages 7 to 13
 Duration 6 hours daily
+Contact opening hours from 09:00-17:30 (Mon to Fri)
+time slot options
 09:00 to 15:00
 09:20 to 15:20
 09:40 to 15:40
@@ -85,6 +90,8 @@ Summer Camp TUD Grangegorman
 Location TUD Grangegorman, Dublin 7
 Age 7-13
 Duration 5.5 hours per day
+Footer opening hours 09:00-17:30
+START / FINISH TIMES
 09:00 to 15:00
 09:20 to 15:20
 09:40 to 15:40
@@ -98,6 +105,9 @@ Summer Camp Killruddery
 Venue Killruddery Estate, Southern Cross Road, Bray, Co. Wicklow A98 W9F2
 Ages 7-13
 Duration 6 hours per day
+For General Enquiries, our office is open from 09:00-17:30 (Mon to Fri)
+START / FINISH TIMES
+Choose from the following start/finish time options
 09:00 to 15:00
 09:20 to 15:20
 09:40 to 15:40
@@ -115,6 +125,8 @@ assert.equal(records.providers[0].provider_id, 'P0003');
 assert.equal(records.providers[0].activity_category, 'Outdoor Adventure');
 assert.equal(records.providers[0].provider_type, 'Private');
 assert.equal(camps.length, 15);
+assert.equal(camps.some((camp) => camp.start_time === '09:00' && camp.end_time === '17:30'), false);
+assert.equal(camps.some((camp) => camp.end_time === '17:30'), false);
 assert.ok(new Set(camps.map((camp) => camp.price)).size > 1);
 
 const byTown = (town) => camps.filter((camp) => camp.town === town);
