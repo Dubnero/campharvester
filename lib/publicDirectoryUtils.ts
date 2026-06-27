@@ -58,6 +58,51 @@ export function getUniquePublicValues(camps: PublicCamp[], key: keyof Pick<Camp,
   return Array.from(new Set(camps.map((camp) => String(camp[key]).trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 }
 
+const invalidTownPlaceholders = new Set([
+  "tbc",
+  "to be confirmed",
+  "unknown",
+  "n/a",
+  "na",
+  "none",
+  "null",
+  "undefined",
+  "various",
+  "multiple",
+  "online",
+]);
+
+function normalizeTownOption(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+export function isValidPublicTown(value: string) {
+  const town = normalizeTownOption(value);
+  if (!town) return false;
+  if (!/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(town)) return false;
+  if (invalidTownPlaceholders.has(town.toLowerCase())) return false;
+  if (/^[^A-Za-zÀ-ÖØ-öø-ÿ0-9]+$/.test(town)) return false;
+  if (/\b[A-Z0-9]{3}\s?[A-Z0-9]{4}\b/i.test(town)) return false;
+  return true;
+}
+
+export function getPublicTownOptions(camps: PublicCamp[], county = "") {
+  const selectedCounty = county.trim();
+  return Array.from(
+    new Set(
+      camps
+        .filter((camp) => !selectedCounty || camp.county === selectedCounty)
+        .map((camp) => normalizeTownOption(camp.town))
+        .filter(isValidPublicTown),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+export function townForCountyOrBlank(camps: PublicCamp[], county: string, selectedTown: string) {
+  if (!selectedTown) return "";
+  return getPublicTownOptions(camps, county).includes(selectedTown) ? selectedTown : "";
+}
+
 function hasPrice(camp: PublicCamp) {
   return camp.price.trim().length > 0;
 }

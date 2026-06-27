@@ -12,7 +12,9 @@ import {
   formatLocationLines,
   formatPublicTimeDetails,
   publicDayLengthLabel,
+  getPublicTownOptions,
   getUniquePublicValues,
+  townForCountyOrBlank,
   sortPublicCamps,
   type PublicFilters,
   type PublicSort,
@@ -69,7 +71,7 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
   const filteredCamps = useMemo(() => filterPublicCamps(publicCamps, filters), [publicCamps, filters]);
   const sortedCamps = useMemo(() => sortPublicCamps(filteredCamps, sort), [filteredCamps, sort]);
   const counties = useMemo(() => getUniquePublicValues(publicCamps, "county"), [publicCamps]);
-  const towns = useMemo(() => getUniquePublicValues(publicCamps, "town"), [publicCamps]);
+  const towns = useMemo(() => getPublicTownOptions(publicCamps, filters.county), [publicCamps, filters.county]);
   const activities = useMemo(() => getUniquePublicValues(publicCamps, "activity_type"), [publicCamps]);
   const holidays = useMemo(() => getUniquePublicValues(publicCamps, "holiday_type"), [publicCamps]);
   const activeChips = useMemo<FilterChip[]>(() => {
@@ -91,8 +93,20 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
   const hasActiveFilters = activeChips.length > 0;
 
   function updateFilter(key: keyof PublicFilters, value: string | boolean) {
-    setFilters((current) => ({ ...current, [key]: value }));
+    setFilters((current) => {
+      if (key === "county" && typeof value === "string") {
+        return { ...current, county: value, town: townForCountyOrBlank(publicCamps, value, current.town) };
+      }
+      return { ...current, [key]: value };
+    });
   }
+
+  useEffect(() => {
+    setFilters((current) => {
+      const validTown = townForCountyOrBlank(publicCamps, current.county, current.town);
+      return validTown === current.town ? current : { ...current, town: validTown };
+    });
+  }, [publicCamps]);
 
   function clearFilter(key: keyof PublicFilters) {
     updateFilter(key, typeof initialFilters[key] === "boolean" ? false : "");
