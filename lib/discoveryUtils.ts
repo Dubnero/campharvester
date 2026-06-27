@@ -185,16 +185,42 @@ function aliveOutsidePackagePriceMappingDebug(detailMap: Map<string, AliveOutsid
     return `${packageKey} -> price_5_day ${fiveDay}${fourDay ? `, price_4_day ${fourDay}` : ""}`;
   }).join("; ");
 }
+function aliveOutsideRelevantTimeText(rawText: string) {
+  const lines = rawText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const headingPattern = /\b(?:start\s*\/?\s*finish\s+times?|choose\s+from\s+the\s+following\s+start\s*\/?\s*finish\s+time\s+options?|time\s+slot\s+options?)\b/i;
+  const stopPattern = /\b(?:for\s+general\s+enquiries|general\s+enquir(?:y|ies)|contact|footer|newsletter|opening\s+hours?)\b/i;
+  const sections: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!headingPattern.test(lines[index])) continue;
+    const sectionLines = [lines[index]];
+    for (let next = index + 1; next < Math.min(lines.length, index + 18); next += 1) {
+      if (stopPattern.test(lines[next]) || /^Source URL:/i.test(lines[next])) break;
+      sectionLines.push(lines[next]);
+    }
+    sections.push(sectionLines.join("\n"));
+  }
+  return sections.length ? sections.join("\n") : rawText.split(/\n+/).filter((line) => !stopPattern.test(line)).join("\n");
+}
+function aliveOutsideTimeMinutes(value: string) {
+  const [hour = "0", minute = "0"] = value.split(":");
+  return Number(hour) * 60 + Number(minute);
+}
 function aliveOutsideTimeOptions(rawText: string) {
-  const ranges = Array.from(rawText.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/gi))
+  const timeText = aliveOutsideRelevantTimeText(rawText);
+  const ignoredContext = /\b(?:for\s+general\s+enquiries|general\s+enquir(?:y|ies)|contact|footer|newsletter|opening\s+hours?|from\s+\d{1,2}:\d{2}\s*(?:-|–|to)\s*\d{1,2}:\d{2}\s*\(?(?:mon|tue|wed|thu|fri))/i;
+  const ranges = Array.from(timeText.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/gi))
     .map((match) => {
+      const start = Math.max(0, (match.index ?? 0) - 80);
+      const end = Math.min(timeText.length, (match.index ?? 0) + match[0].length + 80);
+      const context = timeText.slice(start, end);
       const endMarker = match[6];
       const startMarker = match[3] || (endMarker && Number(match[1]) <= Number(match[4]) ? endMarker : undefined);
       const startTime = to24Hour(match[1], match[2], startMarker);
       const endTime = to24Hour(match[4], match[5], endMarker);
-      return { label: match[0], startTime, endTime, hasExplicitTime: Boolean(match[2] || match[3] || match[5] || match[6]) };
+      const minutes = aliveOutsideTimeMinutes(endTime) - aliveOutsideTimeMinutes(startTime);
+      return { label: match[0], startTime, endTime, minutes, ignored: ignoredContext.test(context), hasExplicitTime: Boolean(match[2] || match[3] || match[5] || match[6]) };
     })
-    .filter((range) => range.hasExplicitTime && range.startTime && range.endTime && range.startTime < range.endTime);
+    .filter((range) => range.hasExplicitTime && !range.ignored && range.startTime && range.endTime && range.startTime < range.endTime && range.minutes >= 300 && range.minutes <= 420);
   const unique = Array.from(new Map(ranges.map((range) => [`${range.startTime}-${range.endTime}`, range])).values()).sort((a, b) => a.startTime.localeCompare(b.startTime));
   return { startTime: unique[0]?.startTime || "", endTime: unique[0]?.endTime || "", multipleTimeOptions: unique.length > 1, labels: unique.map((range) => range.label) };
 }
