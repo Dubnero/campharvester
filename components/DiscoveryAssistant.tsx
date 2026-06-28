@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ChangeEvent, FormEvent, useMemo, useState } from "react";
-import { getCamps, getProviders, upsertCamps, upsertProviders } from "@/lib/dataRepository";
+import { getCamps, getProviders, importCampsWithUpdates, upsertProviders } from "@/lib/dataRepository";
 import { DiscoveryCamp, DiscoveryPageAnalysis, DiscoveryProvider, ExtractionPipelineDebug, buildExtractionDebug, dedupeDiscoveryCamps, extractDiscoveryRecords, recordsToCsv } from "@/lib/discoveryUtils";
 import type { Camp, Provider } from "@/lib/types";
 
@@ -54,7 +54,13 @@ function nextProviderId(existingProviders: Provider[], draftProviders: Discovery
   return `P${String((ids.length ? Math.max(...ids) : 0) + 1).padStart(4, "0")}`;
 }
 
-function asImportCamp(camp: DiscoveryCamp): Camp { const { selected, needs_review, duplicateWarnings, comparisonWarnings, matchedExistingCamp, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = camp; return { ...row, status: "draft", verified: false, featured: false }; }
+function asImportCamp(camp: DiscoveryCamp): Camp { const { selected, needs_review, duplicateWarnings, comparisonWarnings, matchedExistingCamp, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = camp; return matchedExistingCamp ? { ...row, status: matchedExistingCamp.status, verified: matchedExistingCamp.verified, featured: matchedExistingCamp.featured } : { ...row, status: "draft", verified: false, featured: false }; }
+export function importButtonLabel(selectedCamps: DiscoveryCamp[]) {
+  const existingCount = selectedCamps.filter((camp) => camp.matchedExistingCamp).length;
+  if (selectedCamps.length > 0 && existingCount === selectedCamps.length) return "Update selected existing camps";
+  if (existingCount > 0) return "Import / update selected camps";
+  return "Import selected drafts";
+}
 function downloadTextFile(filename: string, text: string, type = "text/plain;charset=utf-8") { const url = URL.createObjectURL(new Blob([text], { type })); const link = document.createElement("a"); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url); }
 function debugHostSlug(sourceUrl: string) { try { return new URL(sourceUrl).hostname.replace(/^www\./, "").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "source"; } catch { return "source"; } }
 function debugTimestamp(date = new Date()) { const pad = (value: number) => String(value).padStart(2, "0"); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`; }
@@ -98,7 +104,8 @@ export function DiscoveryAssistant() {
   const [debugCounts, setDebugCounts] = useState<DebugCounts>(blankDebugCounts);
   const selectedProviders = useMemo(() => providers.filter((provider) => provider.selected && !provider.duplicateWarnings.some((warning) => warning.startsWith("Existing provider found"))), [providers]);
   const campsWithSelection = useMemo(() => camps.map((camp) => ({ ...camp, selected: selectedCampKeys.has(campStableKey(camp)) })), [camps, selectedCampKeys]);
-  const selectedCamps = useMemo(() => campsWithSelection.filter((camp) => selectedCampKeys.has(campStableKey(camp)) && camp.duplicateWarnings.length === 0), [campsWithSelection, selectedCampKeys]);
+  const selectedCamps = useMemo(() => campsWithSelection.filter((camp) => selectedCampKeys.has(campStableKey(camp))), [campsWithSelection, selectedCampKeys]);
+  const selectedCampImportLabel = importButtonLabel(selectedCamps);
 
   function mergeExtraction(pages: DiscoveryPageAnalysis[], manual: Record<string, ManualPage>) {
     const inputs = [
@@ -194,7 +201,7 @@ export function DiscoveryAssistant() {
       const matchedExistingCamp = existingCamps.data.find((existing) => existing.camp_id === updatedCamp.camp_id || (existing.provider_id === updatedCamp.provider_id && existing.camp_name.toLowerCase() === updatedCamp.camp_name.toLowerCase() && existing.town.toLowerCase() === updatedCamp.town.toLowerCase() && existing.start_date === updatedCamp.start_date));
       const comparisonWarnings = matchedExistingCamp ? compareExistingCamp(matchedExistingCamp, updatedCamp) : [];
       const duplicateWarnings = matchedExistingCamp ? [`Existing camp found: ${matchedExistingCamp.camp_id} / ${matchedExistingCamp.camp_name}`, comparisonWarnings.length ? "" : "Existing camp found — no differences detected", ...comparisonWarnings.map((comparison) => comparison.warning)].filter(Boolean) : [];
-      return { ...updatedCamp, duplicateWarnings, comparisonWarnings, matchedExistingCamp, selected: duplicateWarnings.length === 0 && updatedCamp.selected };
+      return { ...updatedCamp, duplicateWarnings, comparisonWarnings, matchedExistingCamp, selected: updatedCamp.selected };
     });
     setProviders(flaggedProviders);
     setCamps(flaggedCamps.map((camp) => ({ ...camp, selected: false })));
@@ -220,7 +227,7 @@ export function DiscoveryAssistant() {
   function bulkUpdateCamps(keys: string[], selected: boolean) { setSelectedCampKeys((current) => { const next = new Set(current); for (const key of keys) { if (selected) next.add(key); else next.delete(key); } return next; }); }
   function removeCamp(index: number) { const key = campStableKey(camps[index]); setCamps((rows) => rows.filter((_, rowIndex) => rowIndex !== index)); setSelectedCampKeys((keys) => { const next = new Set(keys); next.delete(key); return next; }); }
   function downloadCsv() { downloadTextFile("discovery-assistant-export.csv", recordsToCsv([...providers, ...campsWithSelection]), "text/csv;charset=utf-8"); }
-  async function importSelected() { const [providerResult, campResult] = await Promise.all([selectedProviders.length ? upsertProviders(selectedProviders.map(asImportProvider)) : Promise.resolve({ data: [], error: null }), selectedCamps.length ? upsertCamps(selectedCamps.map(asImportCamp)) : Promise.resolve({ data: [], error: null })]); setImportSummary(`Imported ${providerResult.data.length} provider(s) and ${campResult.data.length} camp(s). ${[providerResult.error, campResult.error].filter(Boolean).join(" ")}`); }
+  async function importSelected() { const [providerResult, campResult] = await Promise.all([selectedProviders.length ? upsertProviders(selectedProviders.map(asImportProvider)) : Promise.resolve({ data: [], error: null }), selectedCamps.length ? importCampsWithUpdates(selectedCamps.map(asImportCamp)) : Promise.resolve({ data: [], error: null, summary: { inserted: 0, updated: 0 } })]); setImportSummary(`${campResult.summary.inserted} new camp(s) imported. ${campResult.summary.updated} existing camp(s) updated. ${providerResult.data.length} provider(s) imported. ${[providerResult.error, campResult.error].filter(Boolean).join(" ")}`); setSelectedCampKeys(new Set()); await detectDuplicates(providers, camps); }
 
   return <main className="app-shell"><header className="hero"><div><p className="eyebrow">Internal admin · draft discovery</p><h1>Discovery Assistant</h1><p>Analyse provider and camp pages, review deterministic draft records, then import selected unverified drafts.</p></div><div className="hero-actions"><Link className="button-link" href="/">Dashboard</Link></div></header>
     <section className="panel"><h2>Analyse source</h2><form className="edit-form" onSubmit={analyse}>{Object.keys(blankForm).map((key) => <label key={key}>{label(key)}<input value={form[key as keyof FormState]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} required={key === "sourceUrl"} /></label>)}<div className="form-actions wide-field"><button type="submit">Analyse page</button><button type="button" className="secondary" onClick={() => setManualMode(true)}>Paste page text instead</button></div></form>{manualMode ? <label className="wide-field">Paste page text instead<textarea rows={8} value={pageText} onChange={(event) => setPageText(event.target.value)} /></label> : null}<p>{fetchMessage}</p></section>
@@ -231,7 +238,7 @@ export function DiscoveryAssistant() {
     <ReviewTable title="Providers" fields={providerFields} rows={providers} update={updateProvider} remove={(index) => setProviders((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
     <CampCards camps={campsWithSelection} update={updateCamp} bulkUpdate={bulkUpdateCamps} remove={removeCamp} />
     <details className="panel"><summary>Advanced spreadsheet view</summary><ReviewTable title="Camps" fields={campFields} rows={campsWithSelection} update={updateCamp} remove={removeCamp} /></details>
-    <section className="panel"><div className="form-actions"><button type="button" className="secondary" onClick={downloadCsv} disabled={!providers.length && !camps.length}>Export CSV</button><button type="button" onClick={importSelected} disabled={!selectedProviders.length && !selectedCamps.length}>Import selected drafts</button></div>{importSummary ? <p>{importSummary}</p> : null}</section></main>;
+    <section className="panel"><div className="form-actions"><button type="button" className="secondary" onClick={downloadCsv} disabled={!providers.length && !camps.length}>Export CSV</button><button type="button" onClick={importSelected} disabled={!selectedProviders.length && !selectedCamps.length}>{selectedCampImportLabel}</button></div>{importSummary ? <p>{importSummary}</p> : null}</section></main>;
 }
 
 function AnalysisLogPanel({ log, pages, activeManualUrl, manualDraft, onPaste, onDraftChange, onSubmitManual }: { log: AnalysisLog | null; pages: DiscoveryPageAnalysis[]; activeManualUrl: string; manualDraft: string; onPaste: (url: string) => void; onDraftChange: (value: string) => void; onSubmitManual: () => void }) {
