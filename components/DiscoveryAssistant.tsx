@@ -12,7 +12,7 @@ type AnalysisLog = { sourceUrl: string; discoveredUrls: string[]; crawledUrls: s
 type ManualPage = { url: string; text: string };
 type DebugCounts = { productPagesCrawled: number; rawCampRecordsExtracted: number; uniqueCampSchedulesAfterDedupe: number; duplicateCampRecordsRemoved: number };
 type DebugExportPayload = { sourceUrl: string; generatedAt: string; crawlMetrics: AnalysisLog | null; urlStatus: DiscoveryPageAnalysis[]; pagesCrawled: string[]; debugCounts: DebugCounts; productUrls: { discovered: string[]; crawled: string[]; skipped: Array<{ url: string; reason: string }>; skipped_product_urls_due_to_limit: string[] }; debugItems: ExtractionPipelineDebug[] };
-type CampReviewFilters = { county: string; town: string; provider: string; holidayType: string; activityType: string; startDate: string; endDate: string; priceStatus: "" | "present" | "missing"; needsReview: "" | "yes" | "no"; confidence: string; sourceMethod: "" | "crawler" | "manual_paste"; search: string };
+type CampReviewFilters = { county: string; town: string; provider: string; holidayType: string; activityType: string; startDate: string; endDate: string; priceStatus: "" | "present" | "missing"; needsReview: "" | "yes" | "no"; confidence: string; sourceMethod: "" | "crawler" | "manual_paste" | "ai"; search: string };
 const blankForm: FormState = { sourceUrl: "", providerId: "", providerName: "", county: "", activityType: "", holidayType: "", notes: "" };
 const blankDebugCounts: DebugCounts = { productPagesCrawled: 0, rawCampRecordsExtracted: 0, uniqueCampSchedulesAfterDedupe: 0, duplicateCampRecordsRemoved: 0 };
 const blankCampReviewFilters: CampReviewFilters = { county: "", town: "", provider: "", holidayType: "", activityType: "", startDate: "", endDate: "", priceStatus: "", needsReview: "", confidence: "", sourceMethod: "", search: "" };
@@ -24,7 +24,7 @@ export function isMeaningfulFilterOption(value: string) { const trimmed = value.
 export function uniqueOptions(values: string[]) { return Array.from(new Set(values.map((value) => value.trim()).filter(isMeaningfulFilterOption))).sort((a, b) => a.localeCompare(b)); }
 function normalizedIncludes(value: string | number | boolean | undefined, search: string) { return String(value ?? "").toLowerCase().includes(search.trim().toLowerCase()); }
 function campStableKey(camp: Pick<DiscoveryCamp, "camp_id" | "provider_id" | "camp_name" | "town" | "start_date" | "end_date" | "booking_url">) { return [camp.camp_id, camp.provider_id, camp.camp_name, camp.town, camp.start_date, camp.end_date, camp.booking_url].map((value) => String(value ?? "").trim().toLowerCase()).join("|"); }
-function methodBadge(method: DiscoveryProvider["source_method"] | DiscoveryCamp["source_method"]) { return method === "manual_paste" ? "📋 Manual" : "🕷 Crawled"; }
+function methodBadge(method: DiscoveryProvider["source_method"] | DiscoveryCamp["source_method"]) { return method === "ai" ? "✨ AI extracted" : method === "manual_paste" ? "📋 Manual" : "🕷 Crawled"; }
 function asImportProvider(provider: DiscoveryProvider): Provider { const { selected, needs_review, duplicateWarnings, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = provider; return { ...row, status: "draft", verified: false, featured: false }; }
 const developerDebug = true;
 
@@ -86,6 +86,9 @@ export function DiscoveryAssistant() {
   const [analysisLog, setAnalysisLog] = useState<AnalysisLog | null>(null);
   const [pageAnalyses, setPageAnalyses] = useState<DiscoveryPageAnalysis[]>([]);
   const [fetchMessage, setFetchMessage] = useState("");
+  const [aiMessage, setAiMessage] = useState("");
+  const [aiNotes, setAiNotes] = useState("");
+  const [isAiExtracting, setIsAiExtracting] = useState(false);
   const [importSummary, setImportSummary] = useState("");
   const [debugItems, setDebugItems] = useState<ExtractionPipelineDebug[]>([]);
   const [debugCounts, setDebugCounts] = useState<DebugCounts>(blankDebugCounts);
@@ -134,6 +137,8 @@ export function DiscoveryAssistant() {
     setActiveManualUrl("");
     setDebugItems([]);
     setDebugCounts(blankDebugCounts);
+    setAiMessage("");
+    setAiNotes("");
     setSelectedCampKeys(new Set());
     if (!manualMode) {
       const response = await fetch("/api/discovery/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: form.sourceUrl }) });
@@ -197,6 +202,35 @@ export function DiscoveryAssistant() {
     if (repoWarnings.length) setWarnings((current) => [...current, ...repoWarnings.map((warning) => `Duplicate check warning: ${warning}`)]);
   }
 
+
+  function currentReadableText() {
+    const analysedText = pageAnalyses.filter((page) => page.text?.trim()).map((page) => `Source URL: ${page.url}\n${page.text}`).join("\n\n");
+    const manualText = Object.values(manualPages).filter((page) => page.text.trim()).map((page) => `Source URL: ${page.url}\n${page.text}`).join("\n\n");
+    return [analysedText, manualText, pageText && manualMode ? `Source URL: ${form.sourceUrl}\n${pageText}` : ""].filter(Boolean).join("\n\n");
+  }
+
+  async function aiExtract() {
+    const readableText = currentReadableText();
+    if (!form.sourceUrl || !readableText.trim()) { setAiMessage("Fetch a readable URL or paste page text before AI extraction."); return; }
+    setIsAiExtracting(true);
+    setAiMessage("AI is extracting camp data...");
+    setAiNotes("");
+    try {
+      const response = await fetch("/api/discovery/ai-extract", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source_url: form.sourceUrl, readable_text: readableText, default_provider_id: form.providerId, default_provider_name: form.providerName, default_county: form.county, default_activity_type: form.activityType, holiday_type: form.holidayType }) });
+      const result = await response.json();
+      if (!response.ok) { setAiMessage(result.error ?? "AI extraction failed."); return; }
+      setWarnings(Array.from(new Set([...(result.warnings ?? [])])));
+      setAiNotes(result.extraction_notes ?? "");
+      setDebugCounts({ productPagesCrawled: 0, rawCampRecordsExtracted: (result.camps ?? []).length, uniqueCampSchedulesAfterDedupe: (result.camps ?? []).length, duplicateCampRecordsRemoved: 0 });
+      await detectDuplicates(result.providers ?? [], result.camps ?? []);
+      setAiMessage(`AI extracted ${(result.camps ?? []).length} camp row(s) for review.`);
+    } catch {
+      setAiMessage("AI extraction failed. Please try again or use Analyse page.");
+    } finally {
+      setIsAiExtracting(false);
+    }
+  }
+
   function updateProvider(index: number, field: keyof DiscoveryProvider, value: string | boolean | number) { setProviders((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row)); }
   function updateCamp(index: number, field: keyof DiscoveryCamp, value: string | boolean | number) {
     const currentCamp = camps[index];
@@ -217,7 +251,7 @@ export function DiscoveryAssistant() {
   async function importSelected() { const [providerResult, campResult] = await Promise.all([selectedProviders.length ? upsertProviders(selectedProviders.map(asImportProvider)) : Promise.resolve({ data: [], error: null }), selectedCamps.length ? importCampsWithUpdates(selectedCamps.map(asImportCamp)) : Promise.resolve({ data: [], error: null, summary: { inserted: 0, updated: 0, unchanged: 0 } })]); setImportSummary(`${campResult.summary.inserted} new camp(s) imported. ${campResult.summary.updated} existing camp(s) updated. ${campResult.summary.unchanged} unchanged existing camp(s) skipped. ${providerResult.data.length} provider(s) imported. ${[providerResult.error, campResult.error].filter(Boolean).join(" ")}`); setSelectedCampKeys(new Set()); await detectDuplicates(providers, camps); }
 
   return <main className="app-shell"><header className="hero"><div><p className="eyebrow">Internal admin · draft discovery</p><h1>Discovery Assistant</h1><p>Analyse provider and camp pages, review deterministic draft records, then import selected unverified drafts.</p></div><div className="hero-actions"><Link className="button-link" href="/">Dashboard</Link></div></header>
-    <section className="panel"><h2>Analyse source</h2><form className="edit-form" onSubmit={analyse}>{Object.keys(blankForm).map((key) => <label key={key}>{label(key)}<input value={form[key as keyof FormState]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} required={key === "sourceUrl"} /></label>)}<div className="form-actions wide-field"><button type="submit">Analyse page</button><button type="button" className="secondary" onClick={() => setManualMode(true)}>Paste page text instead</button></div></form>{manualMode ? <label className="wide-field">Paste page text instead<textarea rows={8} value={pageText} onChange={(event) => setPageText(event.target.value)} /></label> : null}<p>{fetchMessage}</p></section>
+    <section className="panel"><h2>Analyse source</h2><form className="edit-form" onSubmit={analyse}>{Object.keys(blankForm).map((key) => <label key={key}>{label(key)}<input value={form[key as keyof FormState]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} required={key === "sourceUrl"} /></label>)}<div className="form-actions wide-field"><button type="submit">Analyse page</button><button type="button" className="secondary" onClick={() => setManualMode(true)}>Paste page text instead</button><button type="button" className="secondary" onClick={aiExtract} disabled={isAiExtracting || !form.sourceUrl || !currentReadableText().trim()}>{isAiExtracting ? "AI is extracting camp data..." : "AI extract camps"}</button></div></form>{manualMode ? <label className="wide-field">Paste page text instead<textarea rows={8} value={pageText} onChange={(event) => setPageText(event.target.value)} /></label> : null}<p>{fetchMessage}</p>{aiMessage ? <p>{aiMessage}</p> : null}{aiNotes ? <div className="success-box"><strong>AI extraction notes</strong><p>{aiNotes}</p></div> : null}</section>
     <section className="stats-grid"><article><span>Source URL analysed</span><strong>{form.sourceUrl || "—"}</strong></article><article><span>Text extracted length</span><strong>{pageText.length + Object.values(manualPages).reduce((sum, page) => sum + page.text.length, 0)}</strong></article><article><span>Possible providers</span><strong>{providers.length}</strong></article><article><span>Unique camp schedules found</span><strong>{camps.length}</strong></article></section>
     <AnalysisLogPanel log={analysisLog} pages={pageAnalyses} activeManualUrl={activeManualUrl} manualDraft={manualDraft} onPaste={(url) => { setActiveManualUrl(url); setManualDraft(manualPages[url]?.text ?? ""); }} onDraftChange={setManualDraft} onSubmitManual={submitManualPage} />
     {developerDebug ? <DeveloperExtractionDebug items={debugItems} sourceUrl={form.sourceUrl} analysisLog={analysisLog} pages={pageAnalyses} debugCounts={debugCounts} /> : null}
@@ -307,7 +341,7 @@ function CampCards({ camps, update, bulkUpdate, remove }: { camps: DiscoveryCamp
       <label>Price<select value={filters.priceStatus} onChange={updateFilter("priceStatus")}><option value="">Any price status</option><option value="present">Price present</option><option value="missing">Price missing</option></select></label>
       <label>Needs review<select value={filters.needsReview} onChange={updateFilter("needsReview")}><option value="">Any review status</option><option value="yes">Needs review</option><option value="no">Does not need review</option></select></label>
       <label>Confidence threshold<input type="number" min="0" max="100" value={filters.confidence} onChange={updateFilter("confidence")} placeholder="Minimum %" /></label>
-      <label>Source method<select value={filters.sourceMethod} onChange={updateFilter("sourceMethod")}><option value="">Any source</option><option value="crawler">Crawled</option><option value="manual_paste">Manual</option></select></label>
+      <label>Source method<select value={filters.sourceMethod} onChange={updateFilter("sourceMethod")}><option value="">Any source</option><option value="crawler">Crawled</option><option value="manual_paste">Manual</option><option value="ai">AI extracted</option></select></label>
       <label className="review-search">Search<input value={filters.search} onChange={updateFilter("search")} placeholder="Name, town, county, venue, booking URL" /></label>
     </div><div className="summary-pills review-counts"><span>{camps.length} total schedules</span><span>{visibleCamps.length} visible</span><span>{selectedCount} selected camp schedules</span><span>{camps.length - visibleCamps.length} hidden by filters</span><span>{needsReviewCount} needs review</span>{filters.county ? <span>{selectedByCountyCount} selected in {filters.county}</span> : null}</div><div className="form-actions review-bulk-actions"><button type="button" className="secondary" onClick={() => bulkUpdate(visibleKeys, true)}>Select all visible</button><button type="button" className="secondary" onClick={() => bulkUpdate(visibleKeys, false)}>Deselect all visible</button><button type="button" className="secondary" onClick={() => bulkUpdate(camps.map(campStableKey), true)}>Select all</button><button type="button" className="secondary" onClick={() => bulkUpdate(camps.map(campStableKey), false)}>Deselect all</button><button type="button" className="secondary" onClick={() => filters.county && bulkUpdate(countyKeys(filters.county), true)} disabled={!filters.county}>Select by county</button><button type="button" className="secondary" onClick={() => filters.county && bulkUpdate(countyKeys(filters.county), false)} disabled={!filters.county}>Deselect by county</button><button type="button" className="secondary" onClick={() => setFilters(blankCampReviewFilters)}>Clear filters</button></div></div>
     {visibleCamps.length === 0 ? <p className="empty-state">No camp cards match the active review filters.</p> : <div className="camp-review-grid">{visibleCamps.map(({ camp, index }) => <article className="camp-review-card" key={`${camp.camp_id}-${index}`}><div className="camp-card-header"><label className="checkbox-row"><input type="checkbox" checked={camp.selected} onChange={(event) => update(index, "selected", event.target.checked)} /> Select</label><span className="badge">{methodBadge(camp.source_method)}</span><ConfidenceBadge score={camp.confidence} /></div><h3>{camp.camp_name}</h3><div className="review-fields"><ReviewItem label="Location" value={[camp.town, camp.county].filter(Boolean).join(", ") || "—"} confidence={Math.max(camp.fieldConfidence.town ?? 0, camp.fieldConfidence.county ?? 0)} /><ReviewItem label="Dates" value={[camp.start_date, camp.end_date].filter(Boolean).join(" - ") || "—"} confidence={camp.fieldConfidence.start_date ?? 0} /><ReviewItem label="Age" value={camp.age_min || camp.age_max ? `${camp.age_min || "?"}-${camp.age_max || "?"}` : "—"} confidence={camp.fieldConfidence.age ?? 0} /><ReviewItem label="Price" value={camp.price || "—"} confidence={camp.fieldConfidence.price ?? 0} /><ReviewItem label="Activity" value={camp.activity_type || "—"} confidence={camp.fieldConfidence.activity_type ?? 0} /><ReviewItem label="Booking" value={camp.booking_url || "—"} confidence={camp.fieldConfidence.booking_url ?? 0} /></div>{camp.extractionWarnings.length || camp.duplicateWarnings.length ? <div className="warning-box compact"><strong>Warnings</strong>{[...camp.duplicateWarnings, ...camp.extractionWarnings].map((warning) => <small key={warning}>⚠ {warning}</small>)}{camp.comparisonWarnings?.length ? <table className="comparison-table"><thead><tr><th>Field</th><th>Existing</th><th>New extraction</th></tr></thead><tbody>{camp.comparisonWarnings.map((comparison) => <tr key={`${comparison.field}-${comparison.existing}-${comparison.extracted}`}><td>{comparison.field}</td><td>{comparison.existing || "—"}</td><td>{comparison.extracted || "—"}</td></tr>)}</tbody></table> : null}</div> : null}<details><summary>Edit</summary><div className="edit-form card-edit">{campFields.map((field) => { const value = camp[field]; const checkbox = typeof value === "boolean"; return <label key={String(field)}>{label(String(field))}{checkbox ? <input type="checkbox" checked={Boolean(value)} onChange={(event) => update(index, field, event.target.checked)} /> : <input value={String(value ?? "")} onChange={(event) => update(index, field, field === "age_min" || field === "age_max" || field === "confidence" ? Number(event.target.value) : event.target.value)} />}</label>; })}</div></details><button type="button" className="secondary" onClick={() => remove(index)}>Delete</button></article>)}</div>}</>}</section>;
