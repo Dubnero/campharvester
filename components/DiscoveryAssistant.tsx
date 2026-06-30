@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ChangeEvent, FormEvent, useMemo, useState } from "react";
 import { getCamps, getProviders, importCampsWithUpdates, upsertProviders } from "@/lib/dataRepository";
+import { compareExistingCamp } from "@/lib/discoveryCampComparison";
 import { DiscoveryCamp, DiscoveryPageAnalysis, DiscoveryProvider, ExtractionPipelineDebug, buildExtractionDebug, dedupeDiscoveryCamps, extractDiscoveryRecords, recordsToCsv } from "@/lib/discoveryUtils";
 import type { Camp, Provider } from "@/lib/types";
 
@@ -26,20 +27,6 @@ function campStableKey(camp: Pick<DiscoveryCamp, "camp_id" | "provider_id" | "ca
 function methodBadge(method: DiscoveryProvider["source_method"] | DiscoveryCamp["source_method"]) { return method === "manual_paste" ? "📋 Manual" : "🕷 Crawled"; }
 function asImportProvider(provider: DiscoveryProvider): Provider { const { selected, needs_review, duplicateWarnings, confidence, fieldConfidence, extractionWarnings, source_method, ...row } = provider; return { ...row, status: "draft", verified: false, featured: false }; }
 const developerDebug = true;
-const existingCampCompareFields: Array<keyof Pick<Camp, "address" | "eircode" | "price" | "start_date" | "end_date" | "start_time" | "end_time" | "age_min" | "age_max" | "booking_url">> = ["address", "eircode", "price", "start_date", "end_date", "start_time", "end_time", "age_min", "age_max", "booking_url"];
-
-function fieldDisplay(value: string | number | null | undefined) { return String(value ?? "").trim(); }
-function compareExistingCamp(existing: Camp, extracted: DiscoveryCamp) {
-  return existingCampCompareFields.flatMap((field) => {
-    const existingValue = fieldDisplay(existing[field]);
-    const extractedValue = fieldDisplay(extracted[field]);
-    if (!existingValue && !extractedValue) return [];
-    if (existingValue && !extractedValue) return [{ field: label(field), existing: existingValue, extracted: "—", warning: `Existing camp found — existing record has ${label(field)}, new extraction does not` }];
-    if (!existingValue || existingValue === extractedValue) return [];
-    if (field === "booking_url") return [{ field: label(field), existing: existingValue, extracted: extractedValue, warning: "Existing camp found — booking URL differs" }];
-    return [{ field: label(field), existing: existingValue, extracted: extractedValue, warning: `Existing camp found — ${label(field)} differs: existing ${existingValue}, new ${extractedValue}` }];
-  });
-}
 
 function normalizeProviderMatchValue(value: string) { return value.toLowerCase().replace(/[^a-z0-9]/g, ""); }
 function providerMatches(existing: Provider, provider: DiscoveryProvider) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { campHasImportChanges, mergeCampForUpdate, splitCampsByExisting } from "./dataRepository";
+import { mergeCampForUpdate, splitCampsByExisting } from "./dataRepository";
+import { campHasImportChanges, compareExistingCamp } from "./discoveryCampComparison";
 import type { Camp } from "./types";
 
 function camp(overrides: Partial<Camp> = {}): Camp {
@@ -91,4 +92,34 @@ test("unchanged existing camps are skipped rather than counted as updates", () =
   assert.equal(campHasImportChanges(existing, extracted), false);
   assert.equal(result.updateRows.length, 0);
   assert.equal(result.unchangedRows.length, 1);
+});
+
+test("two unchanged existing camps are skipped and not counted as updates", () => {
+  const result = splitCampsByExisting(
+    [camp({ camp_id: "camp-1", last_checked: "2026-06-30" }), camp({ camp_id: "camp-2", source_url: "https://example.com/source-new" })],
+    [camp({ camp_id: "camp-1", last_checked: "2026-06-01" }), camp({ camp_id: "camp-2", source_url: "https://example.com/source-old" })],
+  );
+
+  assert.equal(result.insertRows.length, 0);
+  assert.equal(result.updateRows.length, 0);
+  assert.equal(result.unchangedRows.length, 2);
+});
+
+test("one changed existing camp and one unchanged existing camp report one update and one skip", () => {
+  const result = splitCampsByExisting(
+    [camp({ camp_id: "camp-1", start_time: "10:00" }), camp({ camp_id: "camp-2", source_url: "https://example.com/source-new" })],
+    [camp({ camp_id: "camp-1", start_time: "09:00" }), camp({ camp_id: "camp-2", source_url: "https://example.com/source-old" })],
+  );
+
+  assert.equal(result.updateRows.length, 1);
+  assert.equal(result.unchangedRows.length, 1);
+});
+
+test("no-difference warning logic matches import skip logic", () => {
+  const existing = camp({ source_url: "https://example.com/source-old", last_checked: "2026-06-01" });
+  const extracted = camp({ source_url: "https://example.com/source-new", last_checked: "2026-06-30" });
+
+  assert.deepEqual(compareExistingCamp(existing, extracted), []);
+  assert.equal(campHasImportChanges(existing, extracted), false);
+  assert.equal(splitCampsByExisting([extracted], [existing]).unchangedRows.length, 1);
 });

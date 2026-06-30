@@ -1,5 +1,6 @@
 import { prepareCampForSupabase } from "./campStorage";
 import { prepareProviderForSupabase } from "./providerStorage";
+import { campHasImportChanges } from "./discoveryCampComparison";
 import { supabase, getSupabaseConfigError } from "./supabase";
 import type { Camp, Provider } from "./types";
 
@@ -174,37 +175,6 @@ export function mergeCampForUpdate(existing: Camp, extracted: Camp): Camp {
     featured: existing.featured,
     created_at: existing.created_at,
   };
-}
-
-const unchangedComparisonFields: Array<keyof Camp> = [
-  "camp_name",
-  "provider_id",
-  "county",
-  "town",
-  "address",
-  "eircode",
-  "activity_type",
-  "holiday_type",
-  "age_min",
-  "age_max",
-  "start_date",
-  "end_date",
-  "start_time",
-  "end_time",
-  "half_day_or_full_day",
-  "price",
-  "booking_url",
-  "source_url",
-];
-
-function comparableCampValue(value: Camp[keyof Camp]) {
-  return String(value ?? "").trim();
-}
-
-export function campHasImportChanges(existing: Camp, extracted: Camp) {
-  return unchangedComparisonFields.some(
-    (field) => comparableCampValue(existing[field]) !== comparableCampValue(extracted[field]),
-  );
 }
 
 export function splitCampsByExisting(
