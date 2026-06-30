@@ -1,10 +1,13 @@
 import { prepareCampForSupabase } from "./campStorage";
 import { prepareProviderForSupabase } from "./providerStorage";
+import { campHasImportChanges } from "./discoveryCampComparison";
 import { supabase, getSupabaseConfigError } from "./supabase";
 import type { Camp, Provider } from "./types";
 
 export type DataSource = "supabase" | "localStorage" | "mock";
 export type RepositoryResult<T> = { data: T; error: string | null };
+export type CampImportSummary = { inserted: number; updated: number; unchanged: number };
+export type CampImportResult = RepositoryResult<Camp[]> & { summary: CampImportSummary };
 
 const providerColumns = [
   "provider_id",
@@ -160,6 +163,79 @@ export async function getCamps(): Promise<RepositoryResult<Camp[]>> {
   return {
     data: (data ?? []) as unknown as Camp[],
     error: error?.message ?? null,
+  };
+}
+
+export function mergeCampForUpdate(existing: Camp, extracted: Camp): Camp {
+  return {
+    ...extracted,
+    camp_id: existing.camp_id,
+    status: existing.status,
+    verified: existing.verified,
+    featured: existing.featured,
+    created_at: existing.created_at,
+  };
+}
+
+export function splitCampsByExisting(
+  camps: Camp[],
+  existingCamps: Camp[],
+): { insertRows: Camp[]; updateRows: Camp[]; unchangedRows: Camp[] } {
+  const existingById = new Map(existingCamps.map((camp) => [camp.camp_id, camp]));
+  return camps.reduce<{ insertRows: Camp[]; updateRows: Camp[]; unchangedRows: Camp[] }>((groups, camp) => {
+    const existing = existingById.get(camp.camp_id);
+    if (!existing) groups.insertRows.push(camp);
+    else if (campHasImportChanges(existing, camp)) groups.updateRows.push(mergeCampForUpdate(existing, camp));
+    else groups.unchangedRows.push(mergeCampForUpdate(existing, camp));
+    return groups;
+  }, { insertRows: [], updateRows: [], unchangedRows: [] });
+}
+
+export async function importCampsWithUpdates(
+  camps: Camp[],
+): Promise<CampImportResult> {
+  const missingConfig = configError();
+  if (!supabase || missingConfig) return { data: [], error: missingConfig, summary: { inserted: 0, updated: 0, unchanged: 0 } };
+  if (camps.length === 0) return { data: [], error: null, summary: { inserted: 0, updated: 0, unchanged: 0 } };
+
+  const campIds = camps.map((camp) => camp.camp_id);
+  const { data: existingData, error: lookupError } = await supabase
+    .from("camps")
+    .select(campSelect)
+    .in("camp_id", campIds);
+  if (lookupError) return { data: [], error: lookupError.message, summary: { inserted: 0, updated: 0, unchanged: 0 } };
+
+  const { insertRows, updateRows, unchangedRows } = splitCampsByExisting(
+    camps.map((camp) => prepareCampForSupabase(camp) as Camp),
+    (existingData ?? []) as unknown as Camp[],
+  );
+  const persisted: Camp[] = [];
+  const errors: string[] = [];
+
+  if (insertRows.length) {
+    const { data, error } = await supabase
+      .from("camps")
+      .insert(insertRows.map(toCampRow))
+      .select(campSelect);
+    if (error) errors.push(error.message);
+    persisted.push(...((data ?? []) as unknown as Camp[]));
+  }
+
+  for (const updateRow of updateRows) {
+    const row = toCampRow(updateRow);
+    const { data, error } = await supabase
+      .from("camps")
+      .update(row)
+      .eq("camp_id", updateRow.camp_id)
+      .select(campSelect);
+    if (error) errors.push(error.message);
+    persisted.push(...((data ?? []) as unknown as Camp[]));
+  }
+
+  return {
+    data: persisted,
+    error: errors.length ? errors.join(" ") : null,
+    summary: { inserted: insertRows.length, updated: updateRows.length, unchanged: unchangedRows.length },
   };
 }
 
