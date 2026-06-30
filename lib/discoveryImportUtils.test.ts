@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeCampForUpdate, splitCampsByExisting } from "./dataRepository";
+import { campHasImportChanges, mergeCampForUpdate, splitCampsByExisting } from "./dataRepository";
 import type { Camp } from "./types";
 
 function camp(overrides: Partial<Camp> = {}): Camp {
@@ -52,8 +52,8 @@ test("selected existing camps are classified for update and not duplicated", () 
 
 test("mixed selected rows insert new camps and update existing camps", () => {
   const result = splitCampsByExisting(
-    [camp({ camp_id: "camp-1" }), camp({ camp_id: "camp-2" })],
-    [camp({ camp_id: "camp-1" })],
+    [camp({ camp_id: "camp-1", price: "€150" }), camp({ camp_id: "camp-2" })],
+    [camp({ camp_id: "camp-1", price: "€100" })],
   );
 
   assert.deepEqual(result.updateRows.map((row) => row.camp_id), ["camp-1"]);
@@ -68,14 +68,27 @@ test("existing status is preserved on update while extracted times are applied",
   assert.equal(merged.status, "hidden");
   assert.equal(merged.start_time, "10:00");
   assert.equal(merged.end_time, "15:00");
+  assert.equal(merged.verified, true);
+  assert.equal(merged.featured, true);
 });
 
 test("update result summary counts can report inserted versus updated rows", () => {
   const result = splitCampsByExisting(
-    [camp({ camp_id: "camp-1" }), camp({ camp_id: "camp-2" }), camp({ camp_id: "camp-3" })],
-    [camp({ camp_id: "camp-1" }), camp({ camp_id: "camp-2" })],
+    [camp({ camp_id: "camp-1", price: "€150" }), camp({ camp_id: "camp-2" }), camp({ camp_id: "camp-3" })],
+    [camp({ camp_id: "camp-1", price: "€100" }), camp({ camp_id: "camp-2" })],
   );
 
   assert.equal(result.insertRows.length, 1);
-  assert.equal(result.updateRows.length, 2);
+  assert.equal(result.updateRows.length, 1);
+  assert.equal(result.unchangedRows.length, 1);
+});
+
+test("unchanged existing camps are skipped rather than counted as updates", () => {
+  const existing = camp({ status: "approved", last_checked: "2026-06-01" });
+  const extracted = camp({ status: "draft", last_checked: "2026-06-30" });
+  const result = splitCampsByExisting([extracted], [existing]);
+
+  assert.equal(campHasImportChanges(existing, extracted), false);
+  assert.equal(result.updateRows.length, 0);
+  assert.equal(result.unchangedRows.length, 1);
 });

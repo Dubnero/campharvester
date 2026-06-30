@@ -5,7 +5,7 @@ import type { Camp, Provider } from "./types";
 
 export type DataSource = "supabase" | "localStorage" | "mock";
 export type RepositoryResult<T> = { data: T; error: string | null };
-export type CampImportSummary = { inserted: number; updated: number };
+export type CampImportSummary = { inserted: number; updated: number; unchanged: number };
 export type CampImportResult = RepositoryResult<Camp[]> & { summary: CampImportSummary };
 
 const providerColumns = [
@@ -170,38 +170,72 @@ export function mergeCampForUpdate(existing: Camp, extracted: Camp): Camp {
     ...extracted,
     camp_id: existing.camp_id,
     status: existing.status,
+    verified: existing.verified,
+    featured: existing.featured,
     created_at: existing.created_at,
   };
+}
+
+const unchangedComparisonFields: Array<keyof Camp> = [
+  "camp_name",
+  "provider_id",
+  "county",
+  "town",
+  "address",
+  "eircode",
+  "activity_type",
+  "holiday_type",
+  "age_min",
+  "age_max",
+  "start_date",
+  "end_date",
+  "start_time",
+  "end_time",
+  "half_day_or_full_day",
+  "price",
+  "booking_url",
+  "source_url",
+];
+
+function comparableCampValue(value: Camp[keyof Camp]) {
+  return String(value ?? "").trim();
+}
+
+export function campHasImportChanges(existing: Camp, extracted: Camp) {
+  return unchangedComparisonFields.some(
+    (field) => comparableCampValue(existing[field]) !== comparableCampValue(extracted[field]),
+  );
 }
 
 export function splitCampsByExisting(
   camps: Camp[],
   existingCamps: Camp[],
-): { insertRows: Camp[]; updateRows: Camp[] } {
+): { insertRows: Camp[]; updateRows: Camp[]; unchangedRows: Camp[] } {
   const existingById = new Map(existingCamps.map((camp) => [camp.camp_id, camp]));
-  return camps.reduce<{ insertRows: Camp[]; updateRows: Camp[] }>((groups, camp) => {
+  return camps.reduce<{ insertRows: Camp[]; updateRows: Camp[]; unchangedRows: Camp[] }>((groups, camp) => {
     const existing = existingById.get(camp.camp_id);
-    if (existing) groups.updateRows.push(mergeCampForUpdate(existing, camp));
-    else groups.insertRows.push(camp);
+    if (!existing) groups.insertRows.push(camp);
+    else if (campHasImportChanges(existing, camp)) groups.updateRows.push(mergeCampForUpdate(existing, camp));
+    else groups.unchangedRows.push(mergeCampForUpdate(existing, camp));
     return groups;
-  }, { insertRows: [], updateRows: [] });
+  }, { insertRows: [], updateRows: [], unchangedRows: [] });
 }
 
 export async function importCampsWithUpdates(
   camps: Camp[],
 ): Promise<CampImportResult> {
   const missingConfig = configError();
-  if (!supabase || missingConfig) return { data: [], error: missingConfig, summary: { inserted: 0, updated: 0 } };
-  if (camps.length === 0) return { data: [], error: null, summary: { inserted: 0, updated: 0 } };
+  if (!supabase || missingConfig) return { data: [], error: missingConfig, summary: { inserted: 0, updated: 0, unchanged: 0 } };
+  if (camps.length === 0) return { data: [], error: null, summary: { inserted: 0, updated: 0, unchanged: 0 } };
 
   const campIds = camps.map((camp) => camp.camp_id);
   const { data: existingData, error: lookupError } = await supabase
     .from("camps")
     .select(campSelect)
     .in("camp_id", campIds);
-  if (lookupError) return { data: [], error: lookupError.message, summary: { inserted: 0, updated: 0 } };
+  if (lookupError) return { data: [], error: lookupError.message, summary: { inserted: 0, updated: 0, unchanged: 0 } };
 
-  const { insertRows, updateRows } = splitCampsByExisting(
+  const { insertRows, updateRows, unchangedRows } = splitCampsByExisting(
     camps.map((camp) => prepareCampForSupabase(camp) as Camp),
     (existingData ?? []) as unknown as Camp[],
   );
@@ -231,7 +265,7 @@ export async function importCampsWithUpdates(
   return {
     data: persisted,
     error: errors.length ? errors.join(" ") : null,
-    summary: { inserted: insertRows.length, updated: updateRows.length },
+    summary: { inserted: insertRows.length, updated: updateRows.length, unchanged: unchangedRows.length },
   };
 }
 
