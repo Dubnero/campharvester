@@ -1210,3 +1210,85 @@ button:disabled:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* Discovery Assistant long URL containment */
+.discovery-assistant {
+  max-width: min(1440px, 100%);
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.discovery-assistant .hero,
+.discovery-assistant .panel,
+.discovery-assistant .stats-grid,
+.discovery-assistant .stats-grid article,
+.discovery-assistant form,
+.discovery-assistant label,
+.discovery-assistant .summary-list,
+.discovery-assistant .summary-list ul,
+.discovery-assistant .summary-list li,
+.discovery-assistant .manual-paste-box,
+.discovery-assistant .success-box,
+.discovery-assistant .warning-box,
+.discovery-assistant .warning-box li,
+.discovery-assistant .warning-box small,
+.discovery-assistant .provider-review-card,
+.discovery-assistant .camp-review-card,
+.discovery-assistant .review-fields,
+.discovery-assistant .review-fields div,
+.discovery-assistant .debug-page,
+.discovery-assistant .debug-page section,
+.discovery-assistant .debug-grid,
+.discovery-assistant .debug-grid > div,
+.discovery-assistant .debug-card,
+.discovery-assistant .debug-fields,
+.discovery-assistant .debug-fields dd,
+.discovery-assistant .summary-pills,
+.discovery-assistant .summary-pills span {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.discovery-assistant input,
+.discovery-assistant textarea,
+.discovery-assistant select {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.discovery-assistant .stats-grid strong,
+.discovery-assistant .debug-page h3,
+.discovery-assistant .debug-list li,
+.discovery-assistant .provider-card-fields input,
+.discovery-assistant .provider-card-fields textarea,
+.discovery-assistant .card-edit input,
+.discovery-assistant .url-value {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.discovery-assistant .url-value {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+
+.discovery-assistant .developer-debug {
+  overflow: hidden;
+}
+
+.discovery-assistant .developer-debug pre {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
