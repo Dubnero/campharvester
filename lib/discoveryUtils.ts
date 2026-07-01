@@ -2,7 +2,7 @@ import type { Camp, HolidayType, Provider } from "./types";
 
 export type DiscoveryInput = { sourceUrl: string; providerId?: string; providerName?: string; county?: string; activityType?: string; holidayType?: string; notes?: string };
 export type ConfidenceBreakdown = Record<string, number>;
-export type SourceMethod = "crawler" | "manual_paste";
+export type SourceMethod = "crawler" | "manual_paste" | "ai";
 export type DiscoveryProvider = Provider & { selected: boolean; needs_review: boolean; duplicateWarnings: string[]; confidence: number; fieldConfidence: ConfidenceBreakdown; extractionWarnings: string[]; source_method: SourceMethod };
 export type CampComparison = { field: string; existing: string; extracted: string; warning: string };
 export type DiscoveryCamp = Camp & { selected: boolean; needs_review: boolean; duplicateWarnings: string[]; comparisonWarnings?: CampComparison[]; matchedExistingCamp?: Camp; confidence: number; fieldConfidence: ConfidenceBreakdown; extractionWarnings: string[]; source_method: SourceMethod };

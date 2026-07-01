@@ -12,7 +12,7 @@ const aliveOutsideFallbackPackageUrls = [
 ];
 const likelyCampLink = /\b(camps?|summer|easter|halloween|holiday|programme|program|book(?:ing)?|enrol|enroll|schedule|class)\b|profile\.php|selected_schedule|[?&]id=/i;
 // TODO: Add Google Maps/search discovery, franchise-wide crawling, and LLM extraction in later phases.
-const blockedLink = /\b(social|facebook|instagram|twitter|x\.com|linkedin|youtube|mailto:|tel:|maps?\.|google\.com\/maps|privacy|terms|cookie|login|account|cart|checkout|payment)\b/i;
+const blockedLink = /\b(social|facebook|instagram|twitter|x\.com|linkedin|youtube|mailto:|tel:|maps?\.|google\.com\/maps|privacy|terms|cookie|login|account|cart|checkout|payment|analytics|tagmanager|googletagmanager)\b|\.(?:js|css|png|jpe?g|gif|webp|svg|ico|woff2?)(?:[?#]|$)/i;
 
 type CrawlPage = { url: string; text: string; readableTextLength: number; candidateCount: number; dynamicWarning: boolean; status: "analysed" | "failed"; failureReason?: string; sourceMethod: "crawler"; extractionBlocked?: boolean };
 type SkippedUrl = { url: string; reason: string };
@@ -41,7 +41,7 @@ function htmlToText(html: string) {
 
 function extractLinks(html: string, baseUrl: string) {
   const links: string[] = [];
-  const linkRegex = /<(?:a|iframe|script)\b[^>]*(?:href|src)=["']([^"']+)["'][^>]*>/gi;
+  const linkRegex = /<(?:a|iframe)\b[^>]*(?:href|src)=["']([^"']+)["'][^>]*>/gi;
   let match: RegExpExecArray | null;
   while ((match = linkRegex.exec(html)) !== null) {
     try {
@@ -101,6 +101,16 @@ function isStarcampListingPage(url: URL) { return isStarcampUrl(url) && /^\/(sum
 function isStarcampProductPage(url: URL) { return isStarcampUrl(url) && /^\/product\/[^/]*camp[^/]*\/?$/i.test(url.pathname); }
 function isStarcampPaginationPage(url: URL) { return isStarcampListingPage(url) || (isStarcampUrl(url) && /\/(?:[^/]+-camps-list\/page\/\d+|page\/\d+)\/?$/i.test(url.pathname)); }
 
+
+function campCountyFromPath(pathname: string) {
+  return pathname.match(/\/camps\/([^/]+)\/?$/i)?.[1]?.toLowerCase() || "";
+}
+
+function hasDuplicateNestedPath(pathname: string) {
+  const normalized = pathname.toLowerCase().replace(/\/+$/g, "");
+  return /(\/camps\/[^/]+)\1(?:\/|$)/i.test(normalized);
+}
+
 function hasBookingPathOrQuery(url: URL) {
   return likelyCampLink.test(`${url.pathname}${url.search}`);
 }
@@ -124,6 +134,10 @@ function linkDecision(source: URL, link: string) {
     return "Junior Einsteins listing crawl only follows /events/ URLs";
   }
   if (!isRelatedDomain(source, parsed)) return "External domain is not clearly related to provider";
+  if (hasDuplicateNestedPath(parsed.pathname)) return "Duplicate nested camp URL";
+  const sourceCounty = campCountyFromPath(source.pathname);
+  const targetCounty = campCountyFromPath(parsed.pathname);
+  if (sourceCounty && targetCounty && sourceCounty !== targetCounty) return "Different county camp page skipped";
   if (!hasBookingPathOrQuery(parsed) && !likelyCampLink.test(link)) return "No camp/booking keyword";
   return "crawl";
 }

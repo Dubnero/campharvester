@@ -1136,3 +1136,77 @@ button:disabled:hover {
 .admin-feedback {
   margin-top: 1rem;
 }
+
+.provider-review-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 34rem), 1fr));
+  margin-top: 1rem;
+}
+
+.provider-review-card {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1rem;
+}
+
+.provider-card-header,
+.provider-card-header div,
+.provider-card-flags {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.provider-card-header {
+  justify-content: space-between;
+}
+
+.provider-review-card h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.provider-card-fields {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.provider-field-wide,
+.provider-field-readonly {
+  grid-column: 1 / -1;
+}
+
+.provider-field-readonly {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.7rem;
+}
+
+.provider-field-readonly span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.provider-field-readonly strong,
+.provider-card-fields input,
+.provider-card-fields textarea {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 700px) {
+  .provider-card-fields {
+    grid-template-columns: 1fr;
+  }
+}
