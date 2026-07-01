@@ -2,7 +2,7 @@ import type { Camp, DayLength, HolidayType, Provider } from "./types";
 import type { ConfidenceBreakdown, DiscoveryCamp, DiscoveryProvider } from "./discoveryUtils";
 
 export const missingOpenAIKeyMessage = "AI extraction is not configured. Add OPENAI_API_KEY to the server environment.";
-export const maxAiReadableTextLength = 24000;
+export const maxAiReadableTextLength = 40000;
 
 type AiProviderInput = Partial<Provider>;
 type AiCampInput = Partial<Camp>;
@@ -39,12 +39,66 @@ export function normalizeAiDate(value: unknown, sourceText = "") {
   return raw;
 }
 
-export function selectAiReadableText(readableText: string) {
-  const cleanedLines = readableText.split(/\n+/).map((line) => line.trim()).filter((line) => line && !/^(home|about|contact|privacy|cookie|terms|facebook|instagram|menu|search)$/i.test(line));
-  const campLike = cleanedLines.filter((line, index, lines) => /camp|summer|easter|midterm|halloween|age|date|week|€|book|venue|location|time/i.test(`${lines[index - 1] ?? ""} ${line} ${lines[index + 1] ?? ""}`));
-  const candidate = (campLike.length > 20 ? campLike : cleanedLines).join("\n");
+function normalizeBlockText(value: string) {
+  const normalized = value.replace(/https?:\/\/\S+/gi, " ").replace(/\s+/g, " ").trim().toLowerCase();
+  const date = normalized.match(/\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/)?.[0] || "";
+  const price = normalized.match(/€\s?\d+/)?.[0] || "";
+  const venue = normalized.split(/\s+/).filter((word) => word.length > 2 && !/^(summer|camp|book|now|waiting|list|july|august|june|from|with|and|the)$/.test(word)).slice(0, 8).join(" ");
+  return `${venue}|${date}|${price}` || normalized;
+}
+
+function sourceBlocks(readableText: string) {
+  return readableText.split(/(?:^|\n)\s*Source URL:\s*/).map((block, index) => {
+    if (index === 0) return { url: "", text: block.trim() };
+    const [urlLine = "", ...rest] = block.split(/\n/);
+    return { url: urlLine.trim(), text: rest.join("\n").trim() };
+  }).filter((block) => block.text);
+}
+
+function isNoisyLine(line: string) {
+  return /\.(?:js|css|png|jpe?g|gif|webp|svg|ico|woff2?)(?:\?|$)/i.test(line)
+    || /google-analytics|googletagmanager|gtag\(|dataLayer|cookie|privacy|terms|footer|copyright|facebook|instagram|twitter|linkedin|youtube|whatsapp/i.test(line)
+    || /^https?:\/\//i.test(line)
+    || /^(home|about|contact|privacy policy|terms|cookie policy|menu|search|skip to content)$/i.test(line.trim());
+}
+
+function hasCampSignal(block: string) {
+  return /SUMMER CAMP|\bCAMP\b|Book now|Waiting List|€\s?\d|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\s?(?:-|–|to)\s?\d{1,2}(?::\d{2})?\s?(?:am|pm)\b|\b(?:school|college|academy|centre|center|campus|venue|Dublin|Wicklow|Kildare|Meath|Cork|Galway|Limerick|Waterford)\b/i.test(block);
+}
+
+function usefulBlocks(textBlock: string) {
+  const lines = textBlock.split(/\n+/).map((line) => line.trim()).filter((line) => line && !isNoisyLine(line));
+  const chunks: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const context = lines.slice(Math.max(0, index - 2), Math.min(lines.length, index + 5)).join("\n");
+    if (hasCampSignal(context)) {
+      chunks.push(context);
+      index += 4;
+    }
+  }
+  return chunks;
+}
+
+export function selectAiReadableText(readableText: string, preferredSourceUrl = "") {
+  const blocks = sourceBlocks(readableText);
+  const preferred = preferredSourceUrl ? blocks.filter((block) => block.url === preferredSourceUrl) : [];
+  const preferredSet = new Set(preferred);
+  const others = blocks.filter((block) => !preferredSet.has(block));
+  const ordered = [...preferred, ...others];
+  const seen = new Set<string>();
+  const selected: string[] = [];
+  for (const block of ordered.length ? ordered : [{ url: preferredSourceUrl, text: readableText }]) {
+    const useful = usefulBlocks(block.text);
+    for (const chunk of useful.length ? useful : [block.text]) {
+      const key = normalizeBlockText(chunk);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      selected.push(`${block.url ? `Source URL: ${block.url}\n` : ""}${chunk}`.trim());
+    }
+  }
+  const candidate = selected.join("\n\n---\n\n").trim();
   const trimmed = candidate.length > maxAiReadableTextLength ? candidate.slice(0, maxAiReadableTextLength) : candidate;
-  return { text: trimmed, wasTrimmed: readableText.length > trimmed.length };
+  return { text: trimmed, wasTrimmed: readableText.length > trimmed.length || candidate.length > trimmed.length, originalLength: readableText.length, selectedLength: trimmed.length };
 }
 
 export function mapAiExtraction(raw: RawAiExtraction, request: AiExtractionRequest, sourceText = request.readable_text): AiExtractionResult {

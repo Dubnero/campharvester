@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mapAiExtraction, missingOpenAIKeyMessage, normalizeAiDate, parseOpenAIJson } from "./aiDiscoveryExtraction";
+import { mapAiExtraction, missingOpenAIKeyMessage, normalizeAiDate, parseOpenAIJson, selectAiReadableText } from "./aiDiscoveryExtraction";
 
 const request = { source_url: "https://example.com/camps", readable_text: "Summer Camps 2026" };
 
@@ -39,4 +39,17 @@ test("AI rows enforce draft unverified unfeatured defaults", () => {
   assert.equal(mapped.camps[0].status, "draft");
   assert.equal(mapped.camps[0].verified, false);
   assert.equal(mapped.camps[0].featured, false);
+});
+
+test("AI input preparation prefers source URL, deduplicates noisy blocks, and caps at 40000 characters", () => {
+  const sourceUrl = "https://www.techkidz.ie/camps/dublin/";
+  const repeatedCamp = "SUMMER CAMP Dublin\nSt Mary's School Dublin\nBook now\n8 July 2026\n€160\n9am - 2pm";
+  const huge = `Source URL: https://www.techkidz.ie/camps/cork/\nSUMMER CAMP Cork\nBook now\n9 July 2026\n€160\n\nSource URL: ${sourceUrl}\n${repeatedCamp}\n${repeatedCamp}\nprivacy policy\nhttps://www.googletagmanager.com/gtm.js\n${"footer cookie text\n".repeat(5000)}${"SUMMER CAMP Dublin Book now €160 9am - 2pm\n".repeat(2000)}`;
+  const selected = selectAiReadableText(huge, sourceUrl);
+
+  assert.equal(selected.text.length <= 40000, true);
+  assert.match(selected.text, new RegExp(`Source URL: ${sourceUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.equal(selected.text.includes("googletagmanager"), false);
+  assert.equal((selected.text.match(/St Mary's School Dublin/g) ?? []).length <= 2, true);
+  assert.equal(selected.wasTrimmed, true);
 });
