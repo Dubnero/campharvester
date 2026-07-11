@@ -110,21 +110,11 @@ function rawCamp(id: string, status: string): Camp {
   };
 }
 
-test("approved camps are included publicly", () => {
-  const publicCamps = buildPublicCamps(
-    [rawCamp("approved", "approved")],
-    [provider],
-    { today: "2026-07-01" },
-  );
-  assert.deepEqual(
-    publicCamps.map((publicCamp) => publicCamp.camp_id),
-    ["approved"],
-  );
-});
-
-test("draft hidden archived deleted inactive rejected disabled cancelled canceled blank and unknown statuses are excluded publicly", () => {
+test("existing public status visibility behaviour is preserved", () => {
   const statuses = [
+    "approved",
     "draft",
+    "needs_review",
     "hidden",
     "archived",
     "deleted",
@@ -141,10 +131,13 @@ test("draft hidden archived deleted inactive rejected disabled cancelled cancele
     [provider],
     { today: "2026-07-01" },
   );
-  assert.equal(publicCamps.length, 0);
+  assert.deepEqual(
+    publicCamps.map((publicCamp) => publicCamp.camp_id),
+    statuses.map((_, index) => `camp-${index}`),
+  );
 });
 
-test("public result count only counts approved camps", () => {
+test("public result count is not status-gated by date filtering changes", () => {
   const publicCamps = buildPublicCamps(
     [
       rawCamp("approved", "approved"),
@@ -168,8 +161,8 @@ test("public result count only counts approved camps", () => {
     verifiedOnly: false,
     featuredOnly: false,
   });
-  assert.equal(publicCamps.length, 1);
-  assert.equal(filtered.length, 1);
+  assert.equal(publicCamps.length, 3);
+  assert.equal(filtered.length, 3);
 });
 
 test("camp with end_date yesterday is hidden from public list by default", () => {
@@ -280,4 +273,14 @@ test("past camps remain available to public builders when explicitly included", 
   assert.deepEqual(publicCamps.map((publicCamp) => publicCamp.camp_id), [
     "past-visible-for-detail",
   ]);
+});
+
+test("public directory empty state copy is neutral", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(
+    new URL("../components/PublicDirectory.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /No camps match your current filters\./);
+  assert.doesNotMatch(source, /No approved camps are live yet/);
 });

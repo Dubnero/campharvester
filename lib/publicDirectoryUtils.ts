@@ -44,12 +44,8 @@ export function campPublicSlug(camp: Camp) {
   return `${base}-${camp.camp_id}`;
 }
 
-export function isPublicEligibleCamp(camp: Camp) {
-  return (
-    String(camp.status ?? "")
-      .trim()
-      .toLowerCase() === "approved"
-  );
+export function isPublicEligibleCamp(_camp: Camp) {
+  return true;
 }
 
 function localDateKey(date: Date) {

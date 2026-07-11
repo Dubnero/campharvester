@@ -477,11 +477,7 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
           </div>
         ) : (
           <div className="public-empty-state">
-            <p>
-              {publicCamps.length === 0
-                ? "No approved camps are live yet. Check back soon."
-                : "No camps match those filters yet. Try clearing one or two filters."}
-            </p>
+            <p>No camps match your current filters.</p>
             {publicCamps.length > 0 ? (
               <button type="button" onClick={clearAllFilters}>
                 Clear filters
