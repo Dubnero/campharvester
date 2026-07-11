@@ -96,3 +96,51 @@ test("TechKidz-style duplicate is detected as existing instead of new", () => {
   assert.equal(findExistingCampMatch(extracted, [existing])?.camp_id, "techkidz-blackrock-2026-07-27");
   assert.equal(campHasImportChanges(existing, extracted), false);
 });
+
+test("updating price on an existing camp does not overwrite curated camp_name", () => {
+  const existing = camp({ camp_id: "techkidz-malahide", camp_name: "Malahide - Summer Camp", town: "Malahide", price: "€165" });
+  const extracted = camp({ camp_id: "draft-malahide", camp_name: "MALAHIDE - SUMMER CAMP", town: "Malahide", price: "€175" });
+  const split = splitCampsByExisting([extracted], [existing]);
+  assert.equal(split.updateRows.length, 1);
+  assert.equal(split.updateRows[0].camp_name, "Malahide - Summer Camp");
+  assert.equal(split.updateRows[0].price, "€175");
+});
+
+test("casing-only camp_name differences are ignored as meaningful differences", () => {
+  const existing = camp({ camp_name: "Malahide - Summer Camp", price: "€165" });
+  const extracted = camp({ camp_name: "MALAHIDE - SUMMER CAMP", price: "€165" });
+  assert.equal(campHasImportChanges(existing, extracted), false);
+  assert.equal(compareExistingCamp(existing, extracted).some((item) => item.field === "camp name"), false);
+});
+
+test("existing blank camp_name can be filled from AI row", () => {
+  const existing = camp({ camp_name: "" });
+  const extracted = camp({ camp_name: "Blackrock - Summer Camp" });
+  const merged = mergeCampForUpdate(existing, extracted);
+  assert.equal(campHasImportChanges(existing, extracted), true);
+  assert.equal(merged.camp_name, "Blackrock - Summer Camp");
+});
+
+test("operational fields update while descriptive fields are preserved", () => {
+  const existing = camp({ town: "Blackrock", county: "Dublin", address: "Curated address", activity_type: "STEM", price: "€165", booking_url: "https://techkidz.ie/book/blackrock/" });
+  const extracted = camp({ town: "BLACKROCK", county: "DUBLIN", address: "AI address", activity_type: "Technology", price: "€180", booking_url: "https://techkidz.ie/book/blackrock-2026/", source_url: "https://techkidz.ie/new-source", last_checked: "2026-07-11" });
+  const merged = mergeCampForUpdate(existing, extracted);
+  assert.equal(merged.town, "Blackrock");
+  assert.equal(merged.county, "Dublin");
+  assert.equal(merged.address, "Curated address");
+  assert.equal(merged.activity_type, "STEM");
+  assert.equal(merged.price, "€180");
+  assert.equal(merged.booking_url, "https://techkidz.ie/book/blackrock-2026/");
+  assert.equal(merged.source_url, "https://techkidz.ie/new-source");
+  assert.equal(merged.last_checked, "2026-07-11");
+});
+
+test("status, verified, featured, and created_at remain preserved on curated-field-safe updates", () => {
+  const existing = camp({ status: "approved", verified: true, featured: true, created_at: "2026-01-01T00:00:00Z" });
+  const extracted = camp({ status: "draft", verified: false, featured: false, created_at: "2026-07-11T00:00:00Z", price: "€190" });
+  const merged = mergeCampForUpdate(existing, extracted);
+  assert.equal(merged.status, "approved");
+  assert.equal(merged.verified, true);
+  assert.equal(merged.featured, true);
+  assert.equal(merged.created_at, "2026-01-01T00:00:00Z");
+});

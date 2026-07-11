@@ -1,6 +1,6 @@
 import { prepareCampForSupabase } from "./campStorage";
 import { prepareProviderForSupabase } from "./providerStorage";
-import { campHasImportChanges, findExistingCampMatch } from "./discoveryCampComparison";
+import { campHasImportChanges, curatedCampUpdateFields, findExistingCampMatch, operationalCampUpdateFields } from "./discoveryCampComparison";
 import { supabase, getSupabaseConfigError } from "./supabase";
 import type { Camp, Provider } from "./types";
 
@@ -167,8 +167,18 @@ export async function getCamps(): Promise<RepositoryResult<Camp[]>> {
 }
 
 export function mergeCampForUpdate(existing: Camp, extracted: Camp): Camp {
+  const merged: Camp = { ...existing };
+  for (const field of curatedCampUpdateFields) {
+    const existingValue = String(existing[field] ?? "").trim();
+    const extractedValue = extracted[field];
+    if (!existingValue && String(extractedValue ?? "").trim()) merged[field] = extractedValue as never;
+  }
+  for (const field of operationalCampUpdateFields) {
+    const extractedValue = extracted[field];
+    if (String(extractedValue ?? "").trim()) merged[field] = extractedValue as never;
+  }
   return {
-    ...extracted,
+    ...merged,
     camp_id: existing.camp_id,
     status: existing.status,
     verified: existing.verified,
