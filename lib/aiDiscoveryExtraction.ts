@@ -55,6 +55,15 @@ function sourceBlocks(readableText: string) {
   }).filter((block) => block.text);
 }
 
+function isProgrammeDetailUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return /^\/venues\/[^/]+\/events\/[A-Za-z0-9_-]{4,16}\/?$/i.test(url.pathname) || /^\/events\/[^/?#]+\/?$/i.test(url.pathname) || /\/(?:product|activity-package)\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function isNoisyLine(line: string) {
   return /\.(?:js|css|png|jpe?g|gif|webp|svg|ico|woff2?)(?:\?|$)/i.test(line)
     || /google-analytics|googletagmanager|gtag\(|dataLayer|cookie|privacy|terms|footer|copyright|facebook|instagram|twitter|linkedin|youtube|whatsapp/i.test(line)
@@ -81,10 +90,12 @@ function usefulBlocks(textBlock: string) {
 
 export function selectAiReadableText(readableText: string, preferredSourceUrl = "") {
   const blocks = sourceBlocks(readableText);
-  const preferred = preferredSourceUrl ? blocks.filter((block) => block.url === preferredSourceUrl) : [];
+  const detailBlocks = blocks.filter((block) => isProgrammeDetailUrl(block.url));
+  const detailSet = new Set(detailBlocks);
+  const preferred = preferredSourceUrl ? blocks.filter((block) => block.url === preferredSourceUrl && !detailSet.has(block)) : [];
   const preferredSet = new Set(preferred);
-  const others = blocks.filter((block) => !preferredSet.has(block));
-  const ordered = [...preferred, ...others];
+  const others = blocks.filter((block) => !preferredSet.has(block) && !detailSet.has(block));
+  const ordered = [...detailBlocks, ...preferred, ...others];
   const seen = new Set<string>();
   const selected: string[] = [];
   for (const block of ordered.length ? ordered : [{ url: preferredSourceUrl, text: readableText }]) {

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { extractLinksWithText, isProgrammeDetailLink, isSportsKeyEventDetailPage } from "@/lib/discoveryProgrammeDetails";
 
 const MAX_PAGES = 10;
 const MAX_STARCAMP_PAGES = 260;
 const MAX_JUNIOR_EINSTEINS_EVENT_PAGES = 50;
 const MAX_ALIVE_OUTSIDE_PACKAGE_PAGES = 20;
+const MAX_PROGRAMME_DETAIL_PAGES = 20;
 const aliveOutsideFallbackPackageUrls = [
   "https://www.aliveoutside.ie/activity-package/summer-camp-killruddery/",
   "https://www.aliveoutside.ie/activity-package/summer-camp-tudgrangegorman/",
@@ -37,22 +39,6 @@ function htmlToText(html: string) {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return `${metadataText}\n${bodyText}`.trim();
-}
-
-function extractLinks(html: string, baseUrl: string) {
-  const links: string[] = [];
-  const linkRegex = /<(?:a|iframe)\b[^>]*(?:href|src)=["']([^"']+)["'][^>]*>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = linkRegex.exec(html)) !== null) {
-    try {
-      const link = new URL(match[1], baseUrl);
-      link.hash = "";
-      links.push(link.toString());
-    } catch {
-      // Ignore malformed hrefs.
-    }
-  }
-  return Array.from(new Set(links));
 }
 
 function rootDomain(hostname: string) {
@@ -133,6 +119,7 @@ function linkDecision(source: URL, link: string) {
     if (isJuniorEinsteinsEventPage(parsed)) return "crawl";
     return "Junior Einsteins listing crawl only follows /events/ URLs";
   }
+  if (isSportsKeyEventDetailPage(parsed)) return "crawl";
   if (!isRelatedDomain(source, parsed)) return "External domain is not clearly related to provider";
   if (hasDuplicateNestedPath(parsed.pathname)) return "Duplicate nested camp URL";
   const sourceCounty = campCountyFromPath(source.pathname);
@@ -213,17 +200,24 @@ export async function POST(request: Request) {
         const aliveOutsidePackagePage = isAliveOutsideSummerCampPackagePage(currentParsed);
         const juniorEinsteinsEventPage = isJuniorEinsteinsEventPage(currentParsed);
         pages.push({ url: currentUrl, text, readableTextLength: text.length, candidateCount: aliveOutsideListingMode && !aliveOutsidePackagePage ? 0 : starcampListingMode && !productPage ? 0 : juniorEinsteinsListingMode && !juniorEinsteinsEventPage ? 0 : campCandidateCount(text), dynamicWarning: hasDynamicWarning(html, text), status: "analysed", sourceMethod: "crawler", extractionBlocked: (aliveOutsideListingMode && !aliveOutsidePackagePage) || (starcampListingMode && !productPage) || (juniorEinsteinsListingMode && !juniorEinsteinsEventPage) });
-        const extractedLinks = extractLinks(html, currentUrl);
+        const extractedLinkRecords = extractLinksWithText(html, currentUrl);
+        const programmeDetailLinks = extractedLinkRecords.filter(isProgrammeDetailLink).map((link) => link.url);
+        const extractedLinks = extractedLinkRecords.map((link) => link.url);
         const aliveOutsidePackageLinks = Array.from(new Set(extractedLinks.filter((link) => isAliveOutsideSummerCampPackagePage(new URL(link)))));
         const links = (isAliveOutsideListingPage(currentParsed) && aliveOutsidePackageLinks.length === 0 ? [...aliveOutsideFallbackPackageUrls, ...extractedLinks] : extractedLinks)
-          .sort((a, b) => Number(isAliveOutsideSummerCampPackagePage(new URL(b))) - Number(isAliveOutsideSummerCampPackagePage(new URL(a))) || Number(isJuniorEinsteinsEventPage(new URL(b))) - Number(isJuniorEinsteinsEventPage(new URL(a))));
+          .sort((a, b) => Number(programmeDetailLinks.includes(b)) - Number(programmeDetailLinks.includes(a)) || Number(isAliveOutsideSummerCampPackagePage(new URL(b))) - Number(isAliveOutsideSummerCampPackagePage(new URL(a))) || Number(isJuniorEinsteinsEventPage(new URL(b))) - Number(isJuniorEinsteinsEventPage(new URL(a))));
         if (isAliveOutsideListingPage(currentParsed) && aliveOutsidePackageLinks.length === 0) aliveOutsideFallbackUsed = true;
         let aliveOutsidePackagesQueued = pages.filter((page) => isAliveOutsideSummerCampPackagePage(new URL(page.url))).length + queue.filter((item) => isAliveOutsideSummerCampPackagePage(new URL(item))).length;
+        let programmeDetailsQueued = pages.filter((page) => isSportsKeyEventDetailPage(new URL(page.url))).length + queue.filter((item) => isSportsKeyEventDetailPage(new URL(item))).length;
         for (const link of links) {
           discovered.add(link);
           if (queued.has(link) || crawled.has(link)) continue;
           const decision = linkDecision(source, link);
           if (decision === "crawl") {
+            if (isSportsKeyEventDetailPage(new URL(link))) {
+              if (programmeDetailsQueued >= MAX_PROGRAMME_DETAIL_PAGES) { skipped.set(link, `Programme detail crawl cap reached (${MAX_PROGRAMME_DETAIL_PAGES}).`); continue; }
+              programmeDetailsQueued += 1;
+            }
             if (isAliveOutsideListingPage(source) && isAliveOutsideSummerCampPackagePage(new URL(link))) {
               if (aliveOutsidePackagesQueued >= MAX_ALIVE_OUTSIDE_PACKAGE_PAGES) { skipped.set(link, `Alive Outside package crawl cap reached (${MAX_ALIVE_OUTSIDE_PACKAGE_PAGES}).`); continue; }
               aliveOutsidePackagesQueued += 1;
@@ -271,7 +265,7 @@ export async function POST(request: Request) {
           productUrlsSkipped: Array.from(skipped.keys()).filter((item) => isStarcampProductPage(new URL(item))).length,
         } : undefined,
       },
-      warnings: [pages.some((page) => page.dynamicWarning) ? "This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed." : "", juniorEinsteinsListingMode && queue.length ? `Junior Einsteins crawl limit warning: ${Array.from(discovered).filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length} event(s) discovered, ${pages.filter((page) => isJuniorEinsteinsEventPage(new URL(page.url)) && page.status === "analysed").length} event(s) crawled, ${queue.filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length} event(s) skipped because of crawl limits.` : "", starcampListingMode && queue.length ? `Starcamp crawl limit warning: ${pages.filter((page) => isStarcampPaginationPage(new URL(page.url))).length} listing page(s), ${Array.from(discovered).filter((item) => isStarcampProductPage(new URL(item))).length} product(s) discovered, ${pages.filter((page) => isStarcampProductPage(new URL(page.url)) && page.status === "analysed").length} product(s) crawled, ${queue.filter((item) => isStarcampProductPage(new URL(item))).length} product(s) skipped because of crawl limits: ${queue.filter((item) => isStarcampProductPage(new URL(item))).join(", ")}` : ""].filter(Boolean),
+      warnings: [pages.some((page) => page.dynamicWarning) ? "This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed." : "", Array.from(discovered).some((item) => isSportsKeyEventDetailPage(new URL(item))) && !pages.some((page) => isSportsKeyEventDetailPage(new URL(page.url)) && page.status === "analysed") ? "Only programme summary found; detail sessions may be missing." : "", juniorEinsteinsListingMode && queue.length ? `Junior Einsteins crawl limit warning: ${Array.from(discovered).filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length} event(s) discovered, ${pages.filter((page) => isJuniorEinsteinsEventPage(new URL(page.url)) && page.status === "analysed").length} event(s) crawled, ${queue.filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length} event(s) skipped because of crawl limits.` : "", starcampListingMode && queue.length ? `Starcamp crawl limit warning: ${pages.filter((page) => isStarcampPaginationPage(new URL(page.url))).length} listing page(s), ${Array.from(discovered).filter((item) => isStarcampProductPage(new URL(item))).length} product(s) discovered, ${pages.filter((page) => isStarcampProductPage(new URL(page.url)) && page.status === "analysed").length} product(s) crawled, ${queue.filter((item) => isStarcampProductPage(new URL(item))).length} product(s) skipped because of crawl limits: ${queue.filter((item) => isStarcampProductPage(new URL(item))).join(", ")}` : ""].filter(Boolean),
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to fetch URL." }, { status: 502 });
