@@ -158,19 +158,28 @@ async function fetchPage(url: string) {
 }
 
 export async function POST(request: Request) {
-  const { url } = await request.json();
+  const { url, additionalDetailUrls } = await request.json() as { url?: string; additionalDetailUrls?: string[] | string };
   if (!url || typeof url !== "string") return NextResponse.json({ error: "Source URL is required." }, { status: 400 });
 
   try {
     const source = new URL(url);
     if (!["http:", "https:"].includes(source.protocol)) throw new Error("Only http and https URLs are supported.");
+    const additionalDetailUrlStrings = (Array.isArray(additionalDetailUrls) ? additionalDetailUrls : typeof additionalDetailUrls === "string" ? additionalDetailUrls.split(/\n+/) : [])
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const additionalDetailUrlsSet = new Set<string>();
+    for (const detailUrl of additionalDetailUrlStrings) {
+      const parsed = new URL(detailUrl);
+      if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Only http and https URLs are supported.");
+      additionalDetailUrlsSet.add(parsed.toString());
+    }
 
     let starcampListingMode = false;
     let juniorEinsteinsListingMode = false;
     let aliveOutsideListingMode = false;
-    let maxPages = MAX_PAGES;
+    let maxPages = Math.max(MAX_PAGES, Math.min(MAX_PROGRAMME_DETAIL_PAGES + 1, additionalDetailUrlsSet.size + 1));
     let aliveOutsideFallbackUsed = false;
-    const queue = [source.toString()];
+    const queue = [source.toString(), ...Array.from(additionalDetailUrlsSet)];
     const queued = new Set(queue);
     const crawled = new Set<string>();
     const discovered = new Set<string>();
@@ -235,15 +244,16 @@ export async function POST(request: Request) {
 
     for (const pending of queue) skipped.set(pending, `Safe crawl limit reached (${maxPages} pages).`);
 
-    const text = pages.map((page) => `\n\nSource URL: ${page.url}\n${page.text}`).join("\n").trim();
+    const orderedPages = [...pages].sort((a, b) => Number(additionalDetailUrlsSet.has(b.url)) - Number(additionalDetailUrlsSet.has(a.url)));
+    const text = orderedPages.map((page) => `\n\nSource URL: ${page.url}\n${page.text}`).join("\n").trim();
     return NextResponse.json({
       text,
       length: text.length,
-      pages,
+      pages: orderedPages,
       analysisLog: {
         sourceUrl: source.toString(),
         discoveredUrls: Array.from(discovered),
-        crawledUrls: pages.filter((page) => page.status === "analysed").map((page) => page.url),
+        crawledUrls: orderedPages.filter((page) => page.status === "analysed").map((page) => page.url),
         skippedUrls: Array.from(skipped.entries()).map(([skippedUrl, reason]) => ({ url: skippedUrl, reason } satisfies SkippedUrl)),
         aliveOutside: aliveOutsideListingMode ? {
           packageUrlsDiscovered: Array.from(discovered).filter((item) => isAliveOutsideSummerCampPackagePage(new URL(item))),
@@ -265,7 +275,7 @@ export async function POST(request: Request) {
           productUrlsSkipped: Array.from(skipped.keys()).filter((item) => isStarcampProductPage(new URL(item))).length,
         } : undefined,
       },
-      warnings: [pages.some((page) => page.dynamicWarning) ? "This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed." : "", Array.from(discovered).some((item) => isSportsKeyEventDetailPage(new URL(item))) && !pages.some((page) => isSportsKeyEventDetailPage(new URL(page.url)) && page.status === "analysed") ? "Only programme summary found; detail sessions may be missing." : "", juniorEinsteinsListingMode && queue.length ? `Junior Einsteins crawl limit warning: ${Array.from(discovered).filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length} event(s) discovered, ${pages.filter((page) => isJuniorEinsteinsEventPage(new URL(page.url)) && page.status === "analysed").length} event(s) crawled, ${queue.filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length} event(s) skipped because of crawl limits.` : "", starcampListingMode && queue.length ? `Starcamp crawl limit warning: ${pages.filter((page) => isStarcampPaginationPage(new URL(page.url))).length} listing page(s), ${Array.from(discovered).filter((item) => isStarcampProductPage(new URL(item))).length} product(s) discovered, ${pages.filter((page) => isStarcampProductPage(new URL(page.url)) && page.status === "analysed").length} product(s) crawled, ${queue.filter((item) => isStarcampProductPage(new URL(item))).length} product(s) skipped because of crawl limits: ${queue.filter((item) => isStarcampProductPage(new URL(item))).join(", ")}` : ""].filter(Boolean),
+      warnings: [pages.some((page) => page.dynamicWarning) ? "This page may load camp data dynamically. Manual paste or future browser-rendered extraction may be needed." : "", ...pages.filter((page) => additionalDetailUrlsSet.has(page.url) && page.status === "failed").map((page) => `Additional detail URL failed: ${page.url}${page.failureReason ? ` (${page.failureReason})` : ""}`), Array.from(discovered).some((item) => isSportsKeyEventDetailPage(new URL(item))) && !pages.some((page) => isSportsKeyEventDetailPage(new URL(page.url)) && page.status === "analysed") ? "Only programme summary found; detail sessions may be missing." : "", juniorEinsteinsListingMode && queue.length ? `Junior Einsteins crawl limit warning: ${Array.from(discovered).filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length} event(s) discovered, ${pages.filter((page) => isJuniorEinsteinsEventPage(new URL(page.url)) && page.status === "analysed").length} event(s) crawled, ${queue.filter((item) => isJuniorEinsteinsEventPage(new URL(item))).length} event(s) skipped because of crawl limits.` : "", starcampListingMode && queue.length ? `Starcamp crawl limit warning: ${pages.filter((page) => isStarcampPaginationPage(new URL(page.url))).length} listing page(s), ${Array.from(discovered).filter((item) => isStarcampProductPage(new URL(item))).length} product(s) discovered, ${pages.filter((page) => isStarcampProductPage(new URL(page.url)) && page.status === "analysed").length} product(s) crawled, ${queue.filter((item) => isStarcampProductPage(new URL(item))).length} product(s) skipped because of crawl limits: ${queue.filter((item) => isStarcampProductPage(new URL(item))).join(", ")}` : ""].filter(Boolean),
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to fetch URL." }, { status: 502 });

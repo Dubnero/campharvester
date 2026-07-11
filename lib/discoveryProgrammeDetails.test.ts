@@ -48,3 +48,46 @@ test("missing detail pages warning survives AI mapping without crashing", () => 
   assert.deepEqual(mapped.warnings, ["Only programme summary found; detail sessions may be missing."]);
   assert.equal(mapped.camps.length, 1);
 });
+
+async function withMockFetch<T>(handler: (url: string) => Response | Promise<Response>, run: () => Promise<T>) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL) => handler(String(input))) as typeof fetch;
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+test("additional detail URLs are fetched, included in AI input, and prioritised before listing text", async () => {
+  const { POST } = await import("../app/api/discovery/fetch/route");
+  const fetched: string[] = [];
+  await withMockFetch((url) => {
+    fetched.push(url);
+    if (url === detailUrl) return new Response("<html><body><h1>Trinity Sport - Bravehearts Summer Camp 2026 - Wolves</h1><p>Week 1: 6 July 2026 to 10 July 2026</p><p>€150</p></body></html>");
+    return new Response("<html><body><p>No Events Available</p></body></html>");
+  }, async () => {
+    const response = await POST(new Request("https://example.test/api/discovery/fetch", { method: "POST", body: JSON.stringify({ url: listingUrl, additionalDetailUrls: `${detailUrl}\n` }) }));
+    const result = await response.json() as { text: string; pages: Array<{ url: string; status: string }> };
+
+    assert.deepEqual(fetched, [listingUrl, detailUrl]);
+    assert.equal(result.pages[0].url, detailUrl);
+    assert.equal(result.text.startsWith(`Source URL: ${detailUrl}`), true);
+    assert.match(result.text, /Week 1: 6 July 2026 to 10 July 2026/);
+  });
+});
+
+test("failed additional detail URLs produce warnings without crashing", async () => {
+  const { POST } = await import("../app/api/discovery/fetch/route");
+  await withMockFetch((url) => {
+    if (url === secondDetailUrl) return new Response("Missing", { status: 404 });
+    return new Response("<html><body><p>No Events Available</p></body></html>");
+  }, async () => {
+    const response = await POST(new Request("https://example.test/api/discovery/fetch", { method: "POST", body: JSON.stringify({ url: listingUrl, additionalDetailUrls: [secondDetailUrl] }) }));
+    const result = await response.json() as { warnings: string[]; pages: Array<{ url: string; status: string; failureReason?: string }> };
+
+    assert.equal(response.ok, true);
+    assert.equal(result.pages.some((page) => page.url === secondDetailUrl && page.status === "failed" && page.failureReason === "HTTP 404"), true);
+    assert.equal(result.warnings.some((warning) => warning.includes(`Additional detail URL failed: ${secondDetailUrl}`) && warning.includes("HTTP 404")), true);
+  });
+});
