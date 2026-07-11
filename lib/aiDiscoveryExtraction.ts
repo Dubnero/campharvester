@@ -5,7 +5,7 @@ export const missingOpenAIKeyMessage = "AI extraction is not configured. Add OPE
 export const maxAiReadableTextLength = 40000;
 
 type AiProviderInput = Partial<Provider>;
-type AiCampInput = Partial<Camp>;
+type AiCampInput = Partial<Camp> & { notes?: string };
 export type AiExtractionRequest = { source_url: string; readable_text: string; default_provider_id?: string; default_provider_name?: string; default_county?: string; default_activity_type?: string; holiday_type?: string };
 export type AiExtractionResult = { providers: DiscoveryProvider[]; camps: DiscoveryCamp[]; warnings: string[]; extraction_notes: string };
 export type RawAiExtraction = { providers?: AiProviderInput[]; camps?: AiCampInput[]; warnings?: string[]; extraction_notes?: string };
@@ -21,6 +21,60 @@ function fieldConfidence(fields: string[], row: Record<string, unknown>): Confid
 function normalizedHoliday(value: unknown): HolidayType { const found = holidayTypes.find((holiday) => holiday.toLowerCase() === text(value).toLowerCase()); return found ?? "Other"; }
 function normalizedDayLength(value: unknown): DayLength { const found = dayLengths.find((day) => day.toLowerCase() === text(value).toLowerCase()); return found ?? "Unknown"; }
 function numberOrBlank(value: unknown): number { const parsed = Number(value); return Number.isFinite(parsed) && parsed > 0 ? parsed : ("" as unknown as number); }
+
+const careOptionPattern = /\b(?:pre\s*care|post\s*care|pre\s*\+?\s*post\s*care|individual\s+day)\b/i;
+const careOptionsNote = "Pre-care, post-care and individual day options available on booking page.";
+
+function isCareOptionCamp(camp: AiCampInput) {
+  return careOptionPattern.test(`${text(camp.camp_name)} ${text(camp.notes)} ${text(camp.price)}`);
+}
+
+function stripCareOptionName(value: string) {
+  return value
+    .replace(/\s*(?:[-–—:]|\+)?\s*(?:individual\s+day\s*)?(?:\+\s*)?(?:pre\s*care|post\s*care|pre\s*\+?\s*post\s*care)(?:\s*\+\s*(?:pre\s*care|post\s*care))?/gi, "")
+    .replace(/\s*[-–—:]\s*individual\s+day\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s*[-–—:]\s*$/g, "")
+    .trim();
+}
+
+function campMergeKey(camp: AiCampInput, providerId: string, sourceText: string) {
+  const start = normalizeAiDate(camp.start_date, sourceText);
+  const end = normalizeAiDate(camp.end_date, sourceText);
+  const name = stripCareOptionName(text(camp.camp_name)).toLowerCase().replace(/\s+/g, " ");
+  return [text(camp.provider_id) || providerId, name, text(camp.town), start, end, text(camp.booking_url)].join("|");
+}
+
+function chooseBaseCamp(camps: AiCampInput[]) {
+  return camps.find((camp) => !isCareOptionCamp(camp) && !/sold\s*out/i.test(text(camp.camp_name))) || camps.find((camp) => !isCareOptionCamp(camp)) || camps[0];
+}
+
+function mergeCareOptionCamps(camps: AiCampInput[], fallbackProviderId: string, sourceText: string) {
+  const groups = new Map<string, AiCampInput[]>();
+  for (const camp of camps) {
+    const key = campMergeKey(camp, fallbackProviderId, sourceText);
+    groups.set(key, [...(groups.get(key) ?? []), camp]);
+  }
+  return Array.from(groups.values()).map((group) => {
+    const base = { ...chooseBaseCamp(group) };
+    const hasCareOptions = group.some(isCareOptionCamp);
+    const hasFourDayWeek = group.some((camp) => /4\s*day\s*week/i.test(`${text(camp.camp_name)} ${text(camp.notes)}`));
+    const soldOut = group.some((camp) => /sold\s*out/i.test(`${text(camp.camp_name)} ${text(camp.notes)}`));
+    if (hasCareOptions) base.notes = Array.from(new Set([text(base.notes), careOptionsNote].filter(Boolean))).join(" ");
+    if (soldOut) base.notes = Array.from(new Set([text(base.notes), "Sold out visible on booking page."].filter(Boolean))).join(" ");
+    base.camp_name = stripCareOptionName(text(base.camp_name));
+    if (hasFourDayWeek && !/4\s*day\s*week/i.test(base.camp_name)) base.camp_name = `${base.camp_name} (4 Day Week)`;
+    return base;
+  });
+}
+
+function defaultActivityType(camp: AiCampInput, request: AiExtractionRequest, sourceText: string) {
+  const explicit = text(camp.activity_type) || text(request.default_activity_type);
+  if (explicit) return explicit;
+  if (/children'?s\s+camps?/i.test(sourceText)) return "Children's Camps";
+  if (/brave\s*hearts?/i.test(sourceText)) return "Multi-activity";
+  return "";
+}
 
 export function normalizeAiDate(value: unknown, sourceText = "") {
   const raw = text(value);
@@ -55,6 +109,15 @@ function sourceBlocks(readableText: string) {
   }).filter((block) => block.text);
 }
 
+function isProgrammeDetailUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return /^\/venues\/[^/]+\/events\/[A-Za-z0-9_-]{4,16}\/?$/i.test(url.pathname) || /^\/events\/[^/?#]+\/?$/i.test(url.pathname) || /\/(?:product|activity-package)\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function isNoisyLine(line: string) {
   return /\.(?:js|css|png|jpe?g|gif|webp|svg|ico|woff2?)(?:\?|$)/i.test(line)
     || /google-analytics|googletagmanager|gtag\(|dataLayer|cookie|privacy|terms|footer|copyright|facebook|instagram|twitter|linkedin|youtube|whatsapp/i.test(line)
@@ -81,10 +144,12 @@ function usefulBlocks(textBlock: string) {
 
 export function selectAiReadableText(readableText: string, preferredSourceUrl = "") {
   const blocks = sourceBlocks(readableText);
-  const preferred = preferredSourceUrl ? blocks.filter((block) => block.url === preferredSourceUrl) : [];
+  const detailBlocks = blocks.filter((block) => isProgrammeDetailUrl(block.url));
+  const detailSet = new Set(detailBlocks);
+  const preferred = preferredSourceUrl ? blocks.filter((block) => block.url === preferredSourceUrl && !detailSet.has(block)) : [];
   const preferredSet = new Set(preferred);
-  const others = blocks.filter((block) => !preferredSet.has(block));
-  const ordered = [...preferred, ...others];
+  const others = blocks.filter((block) => !preferredSet.has(block) && !detailSet.has(block));
+  const ordered = [...detailBlocks, ...preferred, ...others];
   const seen = new Set<string>();
   const selected: string[] = [];
   for (const block of ordered.length ? ordered : [{ url: preferredSourceUrl, text: readableText }]) {
@@ -109,14 +174,15 @@ export function mapAiExtraction(raw: RawAiExtraction, request: AiExtractionReque
     return { provider_id: providerId, provider_name: providerName, website: text(provider.website), source_url: request.source_url, primary_email: text(provider.primary_email), primary_phone: text(provider.primary_phone), description: "", primary_county: text(provider.primary_county) || text(request.default_county), activity_category: text(provider.activity_category) || text(request.default_activity_type), provider_type: text(provider.provider_type), status: "draft", verified: boolFalse(), featured: boolFalse(), last_checked: today(), notes: text(provider.notes), selected: Boolean(providerName), needs_review: true, duplicateWarnings: [], confidence: 85, fieldConfidence: fieldConfidence(["provider_name", "website", "primary_email", "primary_phone", "primary_county", "activity_category"], provider as Record<string, unknown>), extractionWarnings: [], source_method: "ai" };
   });
   const fallbackProviderId = providers[0]?.provider_id || text(request.default_provider_id) || slugify(text(request.default_provider_name) || "ai-provider");
-  const camps = (Array.isArray(raw.camps) ? raw.camps : []).map((camp, index): DiscoveryCamp => {
+  const normalizedAiCamps = mergeCareOptionCamps(Array.isArray(raw.camps) ? raw.camps : [], fallbackProviderId, sourceText);
+  const camps = normalizedAiCamps.map((camp, index): DiscoveryCamp => {
     const start = normalizeAiDate(camp.start_date, sourceText);
     const end = normalizeAiDate(camp.end_date, sourceText);
     const campName = text(camp.camp_name);
     const providerId = text(camp.provider_id) || fallbackProviderId;
     const row = { ...camp, start_date: start, end_date: end } as Record<string, unknown>;
-    const extractionWarnings = [!campName ? "Missing camp name" : "", !start ? "Missing start date" : "", !text(camp.county || request.default_county) ? "Missing county" : ""].filter(Boolean);
-    return { camp_id: text(camp.camp_id) || slugify(`${providerId}-${campName || "camp"}-${text(camp.town)}-${start || index + 1}`), provider_id: providerId, camp_name: campName, county: text(camp.county) || text(request.default_county), town: text(camp.town), address: text(camp.address), eircode: text(camp.eircode), activity_type: text(camp.activity_type) || text(request.default_activity_type), holiday_type: normalizedHoliday(camp.holiday_type || request.holiday_type), age_min: numberOrBlank(camp.age_min), age_max: numberOrBlank(camp.age_max), start_date: start, end_date: end, start_time: text(camp.start_time), end_time: text(camp.end_time), half_day_or_full_day: normalizedDayLength(camp.half_day_or_full_day), price: text(camp.price), booking_url: text(camp.booking_url) || request.source_url, status: "draft", verified: false, featured: false, source_url: request.source_url, last_checked: today(), selected: true, needs_review: true, duplicateWarnings: [], confidence: 85, fieldConfidence: fieldConfidence(["camp_name", "county", "town", "start_date", "end_date", "age_min", "age_max", "price", "booking_url", "activity_type"], row), extractionWarnings, source_method: "ai" };
+    const extractionWarnings = [!campName ? "Missing camp name" : "", !start ? "Missing start date" : "", !text(camp.county || request.default_county) ? "Missing county" : "", text(camp.notes)].filter(Boolean);
+    return { camp_id: text(camp.camp_id) || slugify(`${providerId}-${campName || "camp"}-${text(camp.town)}-${start || index + 1}`), provider_id: providerId, camp_name: campName, county: text(camp.county) || text(request.default_county), town: text(camp.town), address: text(camp.address), eircode: text(camp.eircode), activity_type: defaultActivityType(camp, request, sourceText), holiday_type: normalizedHoliday(camp.holiday_type || request.holiday_type), age_min: numberOrBlank(camp.age_min), age_max: numberOrBlank(camp.age_max), start_date: start, end_date: end, start_time: text(camp.start_time), end_time: text(camp.end_time), half_day_or_full_day: normalizedDayLength(camp.half_day_or_full_day), price: text(camp.price), booking_url: text(camp.booking_url) || request.source_url, status: "draft", verified: false, featured: false, source_url: request.source_url, last_checked: today(), selected: true, needs_review: true, duplicateWarnings: [], confidence: 85, fieldConfidence: fieldConfidence(["camp_name", "county", "town", "start_date", "end_date", "age_min", "age_max", "price", "booking_url", "activity_type"], row), extractionWarnings, source_method: "ai" };
   });
   return { providers, camps, warnings, extraction_notes: text(raw.extraction_notes) };
 }
