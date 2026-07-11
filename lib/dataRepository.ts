@@ -1,12 +1,12 @@
 import { prepareCampForSupabase } from "./campStorage";
 import { prepareProviderForSupabase } from "./providerStorage";
-import { campHasImportChanges } from "./discoveryCampComparison";
+import { campHasImportChanges, findExistingCampMatch } from "./discoveryCampComparison";
 import { supabase, getSupabaseConfigError } from "./supabase";
 import type { Camp, Provider } from "./types";
 
 export type DataSource = "supabase" | "localStorage" | "mock";
 export type RepositoryResult<T> = { data: T; error: string | null };
-export type CampImportSummary = { inserted: number; updated: number; unchanged: number };
+export type CampImportSummary = { inserted: number; updated: number; unchanged: number; duplicatesBlocked: number };
 export type CampImportResult = RepositoryResult<Camp[]> & { summary: CampImportSummary };
 
 const providerColumns = [
@@ -181,9 +181,8 @@ export function splitCampsByExisting(
   camps: Camp[],
   existingCamps: Camp[],
 ): { insertRows: Camp[]; updateRows: Camp[]; unchangedRows: Camp[] } {
-  const existingById = new Map(existingCamps.map((camp) => [camp.camp_id, camp]));
   return camps.reduce<{ insertRows: Camp[]; updateRows: Camp[]; unchangedRows: Camp[] }>((groups, camp) => {
-    const existing = existingById.get(camp.camp_id);
+    const existing = findExistingCampMatch(camp, existingCamps);
     if (!existing) groups.insertRows.push(camp);
     else if (campHasImportChanges(existing, camp)) groups.updateRows.push(mergeCampForUpdate(existing, camp));
     else groups.unchangedRows.push(mergeCampForUpdate(existing, camp));
@@ -195,15 +194,13 @@ export async function importCampsWithUpdates(
   camps: Camp[],
 ): Promise<CampImportResult> {
   const missingConfig = configError();
-  if (!supabase || missingConfig) return { data: [], error: missingConfig, summary: { inserted: 0, updated: 0, unchanged: 0 } };
-  if (camps.length === 0) return { data: [], error: null, summary: { inserted: 0, updated: 0, unchanged: 0 } };
+  if (!supabase || missingConfig) return { data: [], error: missingConfig, summary: { inserted: 0, updated: 0, unchanged: 0, duplicatesBlocked: 0 } };
+  if (camps.length === 0) return { data: [], error: null, summary: { inserted: 0, updated: 0, unchanged: 0, duplicatesBlocked: 0 } };
 
-  const campIds = camps.map((camp) => camp.camp_id);
   const { data: existingData, error: lookupError } = await supabase
     .from("camps")
-    .select(campSelect)
-    .in("camp_id", campIds);
-  if (lookupError) return { data: [], error: lookupError.message, summary: { inserted: 0, updated: 0, unchanged: 0 } };
+    .select(campSelect);
+  if (lookupError) return { data: [], error: lookupError.message, summary: { inserted: 0, updated: 0, unchanged: 0, duplicatesBlocked: 0 } };
 
   const { insertRows, updateRows, unchangedRows } = splitCampsByExisting(
     camps.map((camp) => prepareCampForSupabase(camp) as Camp),
@@ -235,7 +232,7 @@ export async function importCampsWithUpdates(
   return {
     data: persisted,
     error: errors.length ? errors.join(" ") : null,
-    summary: { inserted: insertRows.length, updated: updateRows.length, unchanged: unchangedRows.length },
+    summary: { inserted: insertRows.length, updated: updateRows.length, unchanged: unchangedRows.length, duplicatesBlocked: unchangedRows.length },
   };
 }
 
