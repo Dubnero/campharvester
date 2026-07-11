@@ -83,7 +83,12 @@ test("selected town is cleared when it is invalid for the selected county", () =
   assert.equal(townForCountyOrBlank(camps, "Wicklow", "Bray"), "Bray");
 });
 
-import { buildPublicCamps, filterPublicCamps } from "./publicDirectoryUtils";
+import {
+  buildPublicCamps,
+  filterPublicCamps,
+  isPastPublicCamp,
+  isUpcomingPublicCamp,
+} from "./publicDirectoryUtils";
 import type { Camp, Provider } from "./types";
 
 const provider: Provider = {
@@ -109,6 +114,7 @@ test("approved camps are included publicly", () => {
   const publicCamps = buildPublicCamps(
     [rawCamp("approved", "approved")],
     [provider],
+    { today: "2026-07-01" },
   );
   assert.deepEqual(
     publicCamps.map((publicCamp) => publicCamp.camp_id),
@@ -133,6 +139,7 @@ test("draft hidden archived deleted inactive rejected disabled cancelled cancele
   const publicCamps = buildPublicCamps(
     statuses.map((status, index) => rawCamp(`camp-${index}`, status)),
     [provider],
+    { today: "2026-07-01" },
   );
   assert.equal(publicCamps.length, 0);
 });
@@ -145,6 +152,7 @@ test("public result count only counts approved camps", () => {
       rawCamp("hidden", "hidden"),
     ],
     [provider],
+    { today: "2026-07-01" },
   );
   const filtered = filterPublicCamps(publicCamps, {
     search: "",
@@ -162,4 +170,114 @@ test("public result count only counts approved camps", () => {
   });
   assert.equal(publicCamps.length, 1);
   assert.equal(filtered.length, 1);
+});
+
+test("camp with end_date yesterday is hidden from public list by default", () => {
+  const publicCamps = buildPublicCamps(
+    [
+      {
+        ...rawCamp("past-end", "approved"),
+        start_date: "2026-07-01",
+        end_date: "2026-07-10",
+      },
+    ],
+    [provider],
+    { today: "2026-07-11" },
+  );
+  assert.deepEqual(publicCamps.map((publicCamp) => publicCamp.camp_id), []);
+});
+
+test("camp with end_date today is shown in public list", () => {
+  const publicCamps = buildPublicCamps(
+    [
+      {
+        ...rawCamp("today-end", "approved"),
+        start_date: "2026-07-01",
+        end_date: "2026-07-11",
+      },
+    ],
+    [provider],
+    { today: "2026-07-11" },
+  );
+  assert.deepEqual(publicCamps.map((publicCamp) => publicCamp.camp_id), [
+    "today-end",
+  ]);
+});
+
+test("camp with future start and end dates is shown in public list", () => {
+  const publicCamps = buildPublicCamps(
+    [
+      {
+        ...rawCamp("future-range", "approved"),
+        start_date: "2026-07-12",
+        end_date: "2026-07-16",
+      },
+    ],
+    [provider],
+    { today: "2026-07-11" },
+  );
+  assert.deepEqual(publicCamps.map((publicCamp) => publicCamp.camp_id), [
+    "future-range",
+  ]);
+});
+
+test("camp with missing end_date but future start_date is shown in public list", () => {
+  const publicCamps = buildPublicCamps(
+    [
+      {
+        ...rawCamp("future-start", "approved"),
+        start_date: "2026-07-12",
+        end_date: "",
+      },
+    ],
+    [provider],
+    { today: "2026-07-11" },
+  );
+  assert.deepEqual(publicCamps.map((publicCamp) => publicCamp.camp_id), [
+    "future-start",
+  ]);
+});
+
+test("camp with missing end_date and past start_date is hidden from public list by default", () => {
+  const publicCamps = buildPublicCamps(
+    [
+      {
+        ...rawCamp("past-start", "approved"),
+        start_date: "2026-07-10",
+        end_date: "",
+      },
+    ],
+    [provider],
+    { today: "2026-07-11" },
+  );
+  assert.deepEqual(publicCamps.map((publicCamp) => publicCamp.camp_id), []);
+});
+
+test("public date comparison uses caller local date without time-zone parsing", () => {
+  const currentCamp = { start_date: "2026-07-10", end_date: "2026-07-11" };
+  assert.equal(
+    isUpcomingPublicCamp(currentCamp, new Date(2026, 6, 11, 23, 30)),
+    true,
+  );
+  assert.equal(
+    isPastPublicCamp(currentCamp, new Date(2026, 6, 12, 0, 1)),
+    true,
+  );
+});
+
+test("past camps remain available to public builders when explicitly included", () => {
+  const publicCamps = buildPublicCamps(
+    [
+      {
+        ...rawCamp("past-visible-for-detail", "approved"),
+        start_date: "2026-07-01",
+        end_date: "2026-07-10",
+      },
+    ],
+    [provider],
+    { today: "2026-07-11", includePast: true },
+  );
+  assert.deepEqual(publicCamps.map((publicCamp) => publicCamp.camp_id), [
+    "past-visible-for-detail",
+  ]);
 });

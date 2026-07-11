@@ -62,6 +62,7 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
   const [providers, setProviders] = useState(initialProviders);
   const [filters, setFilters] = useState(initialFilters);
   const [sort, setSort] = useState<PublicSort>("start-date");
+  const [includePastCamps, setIncludePastCamps] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -97,8 +98,8 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
   }, [initialCamps, initialProviders]);
 
   const publicCamps = useMemo(
-    () => buildPublicCamps(camps, providers),
-    [camps, providers],
+    () => buildPublicCamps(camps, providers, { includePast: includePastCamps }),
+    [camps, providers, includePastCamps],
   );
   const filteredCamps = useMemo(
     () => filterPublicCamps(publicCamps, filters),
@@ -338,6 +339,14 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
             />{" "}
             Featured only
           </label>
+          <label className="checkbox-row public-checkbox">
+            <input
+              type="checkbox"
+              checked={includePastCamps}
+              onChange={(event) => setIncludePastCamps(event.target.checked)}
+            />{" "}
+            Include past camps
+          </label>
         </div>
         {hasActiveFilters && (
           <div className="active-filter-row" aria-label="Active filters">
@@ -370,6 +379,11 @@ export function PublicDirectory({ initialCamps, initialProviders }: Props) {
               Showing {filteredCamps.length} of {publicCamps.length} camp
               schedules
             </h2>
+            <p>
+              {includePastCamps
+                ? "Showing upcoming and past camps"
+                : "Showing upcoming camps"}
+            </p>
             <p>Listings update automatically when new camp data is imported.</p>
             <p className="trust-note">
               Camp details can change. Always confirm dates, times, availability

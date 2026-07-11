@@ -5,7 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 import { loadStoredCamps } from "@/lib/campStorage";
 import { loadStoredProviders } from "@/lib/providerStorage";
 import { getCamps, getProviders } from "@/lib/dataRepository";
-import { buildPublicCamps, findPublicCamp, formatAgeRange, formatDateRange, formatTimeRange } from "@/lib/publicDirectoryUtils";
+import {
+  buildPublicCamps,
+  findPublicCamp,
+  formatAgeRange,
+  formatDateRange,
+  formatTimeRange,
+  isPastPublicCamp,
+} from "@/lib/publicDirectoryUtils";
 import type { Camp, Provider } from "@/lib/types";
 
 type Props = { campId: string; initialCamps: Camp[]; initialProviders: Provider[] };
@@ -34,7 +41,15 @@ export function PublicCampDetails({ campId, initialCamps, initialProviders }: Pr
     return () => { active = false; };
   }, [initialCamps, initialProviders]);
 
-  const camp = useMemo(() => findPublicCamp(buildPublicCamps(camps, providers), campId), [campId, camps, providers]);
+  const camp = useMemo(
+    () =>
+      findPublicCamp(
+        buildPublicCamps(camps, providers, { includePast: true }),
+        campId,
+      ),
+    [campId, camps, providers],
+  );
+  const isPastCamp = camp ? isPastPublicCamp(camp) : false;
 
   if (!camp) {
     return (
@@ -60,6 +75,9 @@ export function PublicCampDetails({ campId, initialCamps, initialProviders }: Pr
           <h1>{camp.camp_name}</h1>
           <p>{camp.provider?.provider_name ?? "Provider details coming soon"}</p>
           <a className="button-link" href={actionHref}>{actionLabel}</a>
+          {isPastCamp ? (
+            <p className="trust-note">This camp date has passed.</p>
+          ) : null}
         </header>
         <section className="detail-grid">
           <div className="detail-description"><h2>About this camp</h2><p>{camp.provider?.description || "A full description for this camp will be added as soon as the provider supplies it."}</p></div>
