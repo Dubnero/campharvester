@@ -23,6 +23,11 @@ export type PublicFilters = {
 
 export type PublicSort = "start-date" | "price-asc" | "town-az" | "provider-az";
 
+type PublicCampOptions = {
+  includePast?: boolean;
+  today?: Date | string;
+};
+
 export function slugify(value: string) {
   return value
     .toLowerCase()
@@ -39,24 +44,60 @@ export function campPublicSlug(camp: Camp) {
   return `${base}-${camp.camp_id}`;
 }
 
-export function isPublicEligibleCamp(camp: Camp) {
-  return (
-    String(camp.status ?? "")
-      .trim()
-      .toLowerCase() === "approved"
-  );
+export function isPublicEligibleCamp(_camp: Camp) {
+  return true;
+}
+
+function localDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function currentLocalDateKey(today: Date | string = new Date()) {
+  if (typeof today === "string") return today.slice(0, 10);
+  return localDateKey(today);
+}
+
+function campComparisonDate(camp: Pick<Camp, "start_date" | "end_date">) {
+  return (camp.end_date || camp.start_date).trim().slice(0, 10);
+}
+
+export function isUpcomingPublicCamp(
+  camp: Pick<Camp, "start_date" | "end_date">,
+  today: Date | string = new Date(),
+) {
+  const comparisonDate = campComparisonDate(camp);
+  if (!comparisonDate) return true;
+  return comparisonDate >= currentLocalDateKey(today);
+}
+
+export function isPastPublicCamp(
+  camp: Pick<Camp, "start_date" | "end_date">,
+  today: Date | string = new Date(),
+) {
+  return !isUpcomingPublicCamp(camp, today);
 }
 
 export function buildPublicCamps(
   camps: Camp[],
   providers: Provider[],
+  options: PublicCampOptions = {},
 ): PublicCamp[] {
   const providerLookup = providersById(providers);
-  return camps.filter(isPublicEligibleCamp).map((camp) => ({
-    ...camp,
-    provider: providerLookup[camp.provider_id],
-    publicSlug: campPublicSlug(camp),
-  }));
+  const today = options.today ?? new Date();
+  return camps
+    .filter(
+      (camp) =>
+        isPublicEligibleCamp(camp) &&
+        (options.includePast || isUpcomingPublicCamp(camp, today)),
+    )
+    .map((camp) => ({
+      ...camp,
+      provider: providerLookup[camp.provider_id],
+      publicSlug: campPublicSlug(camp),
+    }));
 }
 
 export function findPublicCamp(camps: PublicCamp[], campIdOrSlug: string) {
