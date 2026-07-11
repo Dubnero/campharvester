@@ -91,3 +91,44 @@ test("failed additional detail URLs produce warnings without crashing", async ()
     assert.equal(result.warnings.some((warning) => warning.includes(`Additional detail URL failed: ${secondDetailUrl}`) && warning.includes("HTTP 404")), true);
   });
 });
+
+test("care options collapse to one weekly camp row with base package price and notes", () => {
+  const mapped = mapAiExtraction({ providers: [{ provider_name: "Trinity Sport" }], camps: [
+    { camp_name: "Trinity Sport - Bravehearts Summer Camp 2026 - Bumblebees Week 3", start_date: "13 July", end_date: "17 July", start_time: "08:45", end_time: "15:45", price: "€220.00", booking_url: detailUrl },
+    { camp_name: "Trinity Sport - Bravehearts Summer Camp 2026 - Bumblebees Week 3 + Pre Care", start_date: "13 July", end_date: "17 July", price: "€250.00", booking_url: detailUrl },
+    { camp_name: "Trinity Sport - Bravehearts Summer Camp 2026 - Bumblebees Week 3 + Post Care", start_date: "13 July", end_date: "17 July", price: "€250.00", booking_url: detailUrl },
+    { camp_name: "Trinity Sport - Bravehearts Summer Camp 2026 - Bumblebees Week 3 + Pre+Post Care", start_date: "13 July", end_date: "17 July", price: "€280.00", booking_url: detailUrl },
+  ], warnings: [] }, { source_url: listingUrl, readable_text: "BraveHearts Childrens Camps 2026" }, "BraveHearts Childrens Camps 2026");
+
+  assert.equal(mapped.camps.length, 1);
+  assert.equal(mapped.camps[0].camp_name, "Trinity Sport - Bravehearts Summer Camp 2026 - Bumblebees Week 3");
+  assert.equal(mapped.camps[0].price, "€220.00");
+  assert.equal(mapped.camps[0].booking_url, detailUrl);
+  assert.equal(mapped.camps[0].activity_type, "Children's Camps");
+  assert.equal(mapped.camps[0].extractionWarnings.includes("Pre-care, post-care and individual day options available on booking page."), true);
+});
+
+test("individual day care variants do not create duplicate week rows", () => {
+  const mapped = mapAiExtraction({ providers: [], camps: [
+    { camp_name: "Bumblebees Week 4", start_date: "20 July 2026", end_date: "24 July 2026", price: "€220.00", booking_url: detailUrl },
+    { camp_name: "Bumblebees Week 4 - Individual Day", start_date: "20 July 2026", end_date: "24 July 2026", price: "€55.00", booking_url: detailUrl },
+    { camp_name: "Bumblebees Week 4 - Individual Day + Pre Care", start_date: "20 July 2026", end_date: "24 July 2026", price: "€65.00", booking_url: detailUrl },
+  ], warnings: [] }, { source_url: listingUrl, readable_text: "BraveHearts 2026" });
+
+  assert.equal(mapped.camps.length, 1);
+  assert.equal(mapped.camps[0].camp_name, "Bumblebees Week 4");
+  assert.equal(mapped.camps[0].price, "€220.00");
+});
+
+test("4-day week wording is preserved while retaining one row per week date range", () => {
+  const mapped = mapAiExtraction({ providers: [], camps: [
+    { camp_name: "Wolves Week 6 (4 Day Week)", start_date: "4 August", end_date: "7 August", price: "€170.00", booking_url: secondDetailUrl },
+    { camp_name: "Wolves Week 6 (4 Day Week) + Pre Care", start_date: "4 August", end_date: "7 August", price: "€200.00", booking_url: secondDetailUrl },
+    { camp_name: "Wolves Week 7", start_date: "10 August", end_date: "14 August", price: "€220.00", booking_url: secondDetailUrl },
+  ], warnings: [] }, { source_url: listingUrl, readable_text: "Summer 2026" });
+
+  assert.equal(mapped.camps.length, 2);
+  assert.deepEqual(mapped.camps.map((camp) => camp.start_date), ["2026-08-04", "2026-08-10"]);
+  assert.match(mapped.camps[0].camp_name, /4 Day Week/);
+  assert.equal(mapped.camps[0].price, "€170.00");
+});
